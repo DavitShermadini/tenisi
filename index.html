@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>ტენისი</title>
+<!-- PWA -->
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="ტენისი">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #wrap {
+    position: relative;
+    width: 100vw; height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    touch-action: none;
+  }
+  canvas { display: block; background: #000; }
+  #overlay {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 18px; color: #fff; text-align: center;
+    background: rgba(0,0,0,0.55);
+    transition: opacity .2s;
+  }
+  #overlay h1 { font-size: 26px; font-weight: 600; letter-spacing: .5px; }
+  #overlay p  { font-size: 15px; opacity: .7; max-width: 300px; line-height: 1.5; }
+  #overlay button {
+    margin-top: 6px; padding: 12px 30px; font-size: 17px;
+    background: #fff; color: #000; border: none; border-radius: 30px;
+    cursor: pointer; font-weight: 600;
+  }
+  #overlay button:active { transform: scale(.96); }
+  #overlay button.ghost {
+    background: transparent; color: #fff;
+    border: 1px solid rgba(255,255,255,0.5); margin-top: 0;
+    padding: 10px 24px; font-size: 15px;
+  }
+  #grid {
+    font-size: 22px; letter-spacing: 3px; line-height: 1.35;
+    max-width: 280px; word-break: break-all;
+  }
+  #grid:empty { display: none; }
+  .hidden { display: none !important; }
+  #soundBtn {
+    position: absolute; top: 14px; right: 14px; z-index: 5;
+    padding: 8px 14px; font-size: 13px; font-weight: 600;
+    background: rgba(255,255,255,0.12); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 20px;
+    cursor: pointer; backdrop-filter: blur(2px);
+  }
+  #soundBtn:active { transform: scale(.95); }
+  #musicBtn {
+    position: absolute; top: 14px; left: 14px; z-index: 5;
+    padding: 8px 12px; font-size: 15px;
+    background: rgba(255,255,255,0.12); color: #fff;
+    border: 1px solid rgba(255,255,255,0.35); border-radius: 20px;
+    cursor: pointer; backdrop-filter: blur(2px);
+  }
+  #musicBtn:active { transform: scale(.95); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <button id="musicBtn" title="ფონური მუსიკა">🎵</button>
+  <button id="soundBtn" title="ხმის გადართვა">🔊 რეტრო</button>
+  <div id="overlay">
+    <h1>ტ ე ნ ი ს ი</h1>
+    <p>გადაატარე თითი ან მაუსი, რომ ქვედა რაკეტი ამოძრავო. დაიჭირე ბურთი და დააბრუნე. 7 ქულა იმარჯვებს.</p>
+    <div id="grid"></div>
+    <button id="startBtn">დაწყება</button>
+    <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const startBtn = document.getElementById('startBtn');
+
+// ---- ლოგიკური ზომები (ვირტუალური კოორდინატები) ----
+// ვთამაშობთ 600x900 ველზე, შემდეგ ვამასშტაბებთ ეკრანზე.
+const W = 600, H = 900;
+let scale = 1, offX = 0, offY = 0;
+
+function resize() {
+  const vw = window.innerWidth, vh = window.innerHeight;
+  scale = Math.min(vw / W, vh / H);
+  const cw = W * scale, ch = H * scale;
+  canvas.style.width = cw + 'px';
+  canvas.style.height = ch + 'px';
+  canvas.width = Math.round(cw * devicePixelRatio);
+  canvas.height = Math.round(ch * devicePixelRatio);
+  ctx.setTransform(devicePixelRatio * scale, 0, 0, devicePixelRatio * scale, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---- თამაშის ობიექტები ----
+const PADDLE_W = W / 5;      // რაკეტის სიგრძე ≈ ეკრანის მეხუთედი
+const PADDLE_H = 14;
+const PADDLE_MARGIN = 40;    // მანძილი კიდიდან
+const BALL = 16;             // კვადრატის გვერდი
+const WIN_SCORE = 7;
+
+const player = { x: W/2 - PADDLE_W/2, y: H - PADDLE_MARGIN };   // ქვედა (მოთამაშე)
+const ai     = { x: W/2 - PADDLE_W/2, y: PADDLE_MARGIN };       // ზედა (ალგორითმი)
+
+let ball = { x: W/2, y: H/2, vx: 0, vy: 0, speed: 0 };
+let scoreP = 0, scoreA = 0;
+let running = false;
+let targetX = player.x; // მოთამაშის სამიზნე პოზიცია (გლუვი მოძრაობისთვის)
+
+// ---- Rally + juice state ----
+let rally = 0;        // მიმდინარე გაცვლის სიგრძე (რამდენჯერ დაარტყეს ცდომის გარეშე)
+let bestRally = 0;    // მატჩის საუკეთესო გაცვლა
+let pointLog = [];    // 'P'/'A' თითო ქულაზე — გასაზიარებელი emoji-ბადისთვის
+let trail = [];       // ბურთის კვალი (motion trail)
+let shake = 0;        // ეკრანის შერყევის სიძლიერე
+let hitStop = 0;      // მიკრო-პაუზა დარტყმაზე (ხდის დარტყმას "წონიანს")
+let rallyPop = 0;     // rally-მთვლელის პულსაცია
+
+const BASE_SPEED = 6;
+const MAX_SPEED = 18;
+const SPEED_STEP = 0.5;  // ყოველ დარტყმაზე აჩქარება
+
+// ---- ხმა: «Электроника Видеоспорт»-ის სტილის square-wave ბიპები ----
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (AC) audioCtx = new AC();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+}
+// მარტივი პიეზო-ტონი: კვადრატული ტალღა, მოკლე ხანგრძლივობა
+function beep(freq, dur, vol) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(freq, t);
+  gain.gain.setValueAtTime(vol || 0.15, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + dur); // მკვეთრი ჩაქრობა
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + dur);
+}
+// ხმაურის მოკლე ბუფერი (ტრანზიენტისთვის) — ერთხელ იქმნება
+let noiseBuf = null;
+function getNoise() {
+  if (!noiseBuf) {
+    const len = Math.floor(audioCtx.sampleRate * 0.15);
+    noiseBuf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuf;
+}
+
+// რეალისტური "ტკაცუნი": ხმაურის იმპულსი ბენდპას ფილტრში (clack) + ხის ტონი (body)
+function knock(freq, dur, vol) {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+
+  // 1) მკვეთრი ტრანზიენტი — ფილტრირებული ხმაური
+  const src = audioCtx.createBufferSource();
+  src.buffer = getNoise();
+  const bp = audioCtx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = freq * 2.2; // ტკაცუნი მაღალ სიხშირეზეა
+  bp.Q.value = 1.2;
+  const ng = audioCtx.createGain();
+  ng.gain.setValueAtTime((vol || 0.4) * 1.1, t);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.6); // ძალიან სწრაფი ჩაქრობა
+  src.connect(bp).connect(ng).connect(audioCtx.destination);
+  src.start(t);
+  src.stop(t + dur);
+
+  // 2) ხის სხეული — მოკლე ტონი ვარდნით
+  const osc = audioCtx.createOscillator();
+  const og = audioCtx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(freq, t);
+  osc.frequency.exponentialRampToValueAtTime(freq * 0.5, t + dur);
+  og.gain.setValueAtTime((vol || 0.4) * 0.6, t);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(og).connect(audioCtx.destination);
+  osc.start(t);
+  osc.stop(t + dur);
+}
+
+// ორი ხმის ნაკრები
+const SOUNDS = {
+  retro: {   // «Электроника» square-wave ბიპები
+    paddle: (m) => beep(660 * m, 0.06, 0.18),
+    wall:   () => beep(440, 0.05, 0.12),
+    score:  () => { beep(180, 0.18, 0.2); setTimeout(() => beep(120, 0.22, 0.2), 90); },
+  },
+  classic: { // რეალური მაგიდის ტენისის "ტკაცუნი"
+    paddle: (m) => knock(900 * m, 0.07, 0.45),
+    wall:   () => knock(600, 0.06, 0.32),
+    score:  () => { knock(420, 0.09, 0.4); setTimeout(() => knock(320, 0.09, 0.34), 80); },
+  },
+};
+
+let soundMode = localStorage.getItem('soundMode') || 'retro'; // ნაგულისხმევი — რეტრო
+const sfx = {
+  // rally-სთან ერთად ტონი მაღლდება → მუსიკალური კრეშენდო
+  paddle: () => SOUNDS[soundMode].paddle(1 + Math.min(rally, 24) * 0.03),
+  wall:   () => SOUNDS[soundMode].wall(),
+  score:  () => SOUNDS[soundMode].score(),
+};
+
+// ================= ფონური მუსიკა (chiptune sequencer) =================
+// ნოტების სიხშირეები (თანაბარტემპერირებული, Hz). 'R' = პაუზა.
+const FREQ = {
+  'D3':146.83,'E3':164.81,'F#3':185.00,'G3':196.00,
+  'A3':220.00,'A#3':233.08,'B3':246.94,
+  'C4':261.63,'C#4':277.18,'D4':293.66,'D#4':311.13,'E4':329.63,'F4':349.23,
+  'F#4':369.99,'G4':392.00,'G#4':415.30,'A4':440.00,'A#4':466.16,'B4':493.88,
+  'C5':523.25,'C#5':554.37,'D5':587.33,'D#5':622.25,'E5':659.25,'F5':698.46,'G5':783.99,'A5':880.00,
+  'R':0,
+};
+
+const BPM = 104;                 // მარშული ტემპი
+const BEAT = 60 / BPM;           // ერთი დარტყმის ხანგრძლივობა წამებში
+
+// «ბრძოლის ყიჟინა მოგვესმა» — არანჟირება მომხმარებლის აკორდების მიხედვით.
+// ფორმატი: ['ნოტა', ხანგრძლივობა beats-ში]. თითო კომენტარი = ლირიკის ერთი ხაზი (აკორდით).
+// მოდი: A მიქსოლიდიური (G-ბუნებრივი), აკორდები power-ად (მარშული ჟღერადობა).
+
+// მელოდია (LEAD) — ზედა ხმა, აკორდის ტონებზე
+const LEAD = [
+  // 1. [A] ბრძოლის ყიჟინა მოგვესმა
+  ['E4',0.5],['E4',0.5],['A4',0.5],['A4',0.5],['B4',0.5],['A4',0.5],['F#4',1],
+  // 2. [A] ბრძოლის ყიჟინა მოგვესმა
+  ['E4',0.5],['E4',0.5],['A4',0.5],['A4',0.5],['C#5',0.5],['B4',0.5],['A4',1],
+  // 3. [E] მშობლიურ მთების ძახილი
+  ['B4',0.5],['B4',0.5],['B4',0.5],['A4',0.5],['G4',0.5],['A4',0.5],['B4',1],
+  // 4. [E→F#→G] ეჰეე ჰეე (აღმავალი შეძახილი)
+  ['E4',1],['F#4',1],['G4',1.5],['R',0.5],
+  // 5. [D] ბრძოლის ყიჟინა მოგვესმა
+  ['A4',0.5],['A4',0.5],['A4',0.5],['F#4',0.5],['D4',0.5],['F#4',0.5],['A4',1],
+  // 6. [A] ტანზე ავისხით აბჯარი
+  ['E4',0.5],['E4',0.5],['A4',0.5],['A4',0.5],['B4',0.5],['A4',0.5],['F#4',1],
+  // 7. [E] წელზე შევიბით მახვილი
+  ['B4',0.5],['B4',0.5],['A4',0.5],['G4',0.5],['F#4',0.5],['G4',0.5],['E4',1],
+  // 8. [E→F#→G] ეჰეე ჰეე
+  ['E4',1],['F#4',1],['G4',1.5],['R',0.5],
+  // 9. [D] ბრძოლის ყიჟინა მოგვესმა
+  ['A4',0.5],['A4',0.5],['A4',0.5],['F#4',0.5],['D4',0.5],['F#4',0.5],['A4',1],
+  // 10. [A] ტანზე ავისხით აბჯარი
+  ['E4',0.5],['E4',0.5],['A4',0.5],['A4',0.5],['C#5',0.5],['B4',0.5],['A4',1],
+  // 11. [E] წელზე შევიბით მახვილი
+  ['B4',0.5],['B4',0.5],['A4',0.5],['G4',0.5],['F#4',0.5],['E4',0.5],['E4',1],
+  // 12. [E→A] ეეე (გადაწყვეტა ტონიკაზე)
+  ['E4',0.5],['D4',0.5],['C#4',1],['B3',0.5],['A3',0.5],['A3',1],
+];
+
+// ბასი (BASS) — აკორდების საფუძვლები, დაბალ ოქტავაში
+const BASS = [
+  ['A3',2],['A3',2],   // 1. A
+  ['A3',2],['A3',2],   // 2. A
+  ['E3',2],['E3',2],   // 3. E
+  ['E3',1],['F#3',1],['G3',2], // 4. E→F#→G
+  ['D3',2],['D3',2],   // 5. D
+  ['A3',2],['A3',2],   // 6. A
+  ['E3',2],['E3',2],   // 7. E
+  ['E3',1],['F#3',1],['G3',2], // 8. E→F#→G
+  ['D3',2],['D3',2],   // 9. D
+  ['A3',2],['A3',2],   // 10. A
+  ['E3',2],['E3',2],   // 11. E
+  ['E3',2],['A3',2],   // 12. E→A (კადენცია)
+];
+
+let musicOn = localStorage.getItem('musicOn') !== 'off'; // ნაგულისხმევად ჩართული
+let musicPlaying = false;
+let schedulerId = null;
+const activeOscs = [];
+
+// ერთი ნოტა — square-wave მოკლე გარსით (chiptune)
+function playNote(freq, start, dur, vol) {
+  if (!audioCtx || freq <= 0) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(freq, start);
+  const v = vol || 0.06;
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(v, start + 0.012);       // მოკლე attack
+  g.gain.setValueAtTime(v, start + dur * 0.7);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur * 0.98); // decay
+  o.connect(g).connect(audioCtx.destination);
+  o.start(start);
+  o.stop(start + dur);
+  activeOscs.push(o);
+  o.onended = () => { const i = activeOscs.indexOf(o); if (i >= 0) activeOscs.splice(i, 1); };
+}
+
+// ერთი ხმის (track) დაგეგმვა startTime-იდან; აბრუნებს ხანგრძლივობას
+function scheduleTrack(track, startTime, vol, staccato) {
+  let t = startTime;
+  for (const [note, beats] of track) {
+    const dur = beats * BEAT;
+    playNote(FREQ[note] || 0, t, dur * (staccato || 0.92), vol);
+    t += dur;
+  }
+  return t - startTime;
+}
+
+// მთელი სიმღერის ერთი გავლა (ბასი + მელოდია ერთდროულად)
+function scheduleSong(startTime) {
+  const dur = scheduleTrack(LEAD, startTime, 0.07, 0.9);  // მელოდია ოდნავ ხმამაღლა
+  scheduleTrack(BASS, startTime, 0.05, 0.95);             // ბასი ჩუმად, ოდნავ გრძელი
+  return dur;
+}
+
+function startMusic() {
+  if (!audioCtx || musicPlaying || !musicOn) return;
+  musicPlaying = true;
+  const loop = () => {
+    if (!musicPlaying) return;
+    const dur = scheduleSong(audioCtx.currentTime + 0.08);
+    schedulerId = setTimeout(loop, dur * 1000 - 60); // gapless loop
+  };
+  loop();
+}
+
+function stopMusic() {
+  musicPlaying = false;
+  if (schedulerId) { clearTimeout(schedulerId); schedulerId = null; }
+  activeOscs.forEach(o => { try { o.stop(); } catch (e) {} });
+  activeOscs.length = 0;
+}
+
+function resetBall(dir) {
+  ball.x = W/2; ball.y = H/2;
+  ball.speed = BASE_SPEED;
+  rally = 0;      // ახალ გაცვლას ვიწყებთ ნულიდან
+  trail = [];
+  // რენდომული კუთხე, მაგრამ ძირითადად ვერტიკალური
+  const angle = (Math.random() * 0.6 - 0.3); // -0.3..0.3 რადიანი გვერდულობა
+  ball.vx = Math.sin(angle) * ball.speed;
+  ball.vy = Math.cos(angle) * ball.speed * (dir || (Math.random() < 0.5 ? 1 : -1));
+}
+
+function startGame() {
+  initAudio(); // მომხმარებლის ჟესტზე ვრთავთ აუდიოს
+  scoreP = 0; scoreA = 0;
+  bestRally = 0; pointLog = [];
+  player.x = ai.x = W/2 - PADDLE_W/2;
+  targetX = player.x;
+  resetBall();
+  running = true;
+  stopMusic(); // თამაშის დროს ფონი ჩუმდება — მხოლოდ sfx რჩება
+  shareBtn.classList.add('hidden');
+  gridEl.textContent = '';
+  overlay.classList.add('hidden');
+}
+
+const gridEl = document.getElementById('grid');
+const shareBtn = document.getElementById('shareBtn');
+let lastResult = null; // ბოლო მატჩის შედეგი გასაზიარებლად
+
+function buildGrid() {
+  // მოთამაშის პერსპექტივიდან: მისი ქულა 🟩, მოწინააღმდეგის ⬛
+  return pointLog.map(p => p === 'P' ? '🟩' : '⬛').join('');
+}
+
+function endGame(msg) {
+  running = false;
+  const won = scoreP > scoreA;
+  const grid = buildGrid();
+  gridEl.textContent = grid;
+
+  overlay.querySelector('h1').textContent = msg;
+  overlay.querySelector('p').textContent =
+    `ანგარიში ${scoreP} : ${scoreA}  •  🔥 საუკეთესო გაცვლა: ${bestRally}`;
+  startBtn.textContent = '↻ კიდევ ერთხელ';
+  shareBtn.classList.remove('hidden');
+
+  // გასაზიარებელი ტექსტი (Wordle-ის სტილში)
+  lastResult =
+    `🏓 ტენისი — ${scoreP}:${scoreA} ${won ? '🏆' : '❌'}\n` +
+    `${grid}\n` +
+    `🔥 საუკეთესო გაცვლა: ${bestRally}\n` +
+    location.href;
+
+  overlay.classList.remove('hidden');
+  startMusic(); // მენიუ დაბრუნდა — ფონური მუსიკა განახლდება
+}
+
+startBtn.addEventListener('click', startGame);
+
+// ---- შედეგის გაზიარება ----
+shareBtn.addEventListener('click', async () => {
+  if (!lastResult) return;
+  try {
+    if (navigator.share) {
+      await navigator.share({ text: lastResult });
+    } else {
+      await navigator.clipboard.writeText(lastResult);
+      shareBtn.textContent = '✅ დაკოპირდა!';
+      setTimeout(() => shareBtn.textContent = '📤 შედეგის გაზიარება', 1600);
+    }
+  } catch (e) { /* მომხმარებელმა გააუქმა — ვჩუმდებით */ }
+});
+
+// ---- მყისიერი "კიდევ ერთხელ": Space ან ტაპი ეკრანზე ----
+function tryInstantRestart() {
+  if (!running && !overlay.classList.contains('hidden')) startGame();
+}
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); tryInstantRestart(); }
+});
+
+// ---- ხმის გადამრთველი ----
+const soundBtn = document.getElementById('soundBtn');
+function updateSoundBtn() {
+  soundBtn.textContent = soundMode === 'retro' ? '🔊 რეტრო' : '🏓 კლასიკური';
+}
+updateSoundBtn();
+soundBtn.addEventListener('click', () => {
+  initAudio();
+  soundMode = soundMode === 'retro' ? 'classic' : 'retro';
+  localStorage.setItem('soundMode', soundMode);
+  updateSoundBtn();
+  sfx.paddle(); // ნიმუში — რომ მაშინვე მოისმინო
+});
+
+// ---- ფონური მუსიკის გადამრთველი ----
+const musicBtn = document.getElementById('musicBtn');
+function updateMusicBtn() { musicBtn.textContent = musicOn ? '🎵' : '🔇'; }
+updateMusicBtn();
+musicBtn.addEventListener('click', () => {
+  initAudio();
+  musicOn = !musicOn;
+  localStorage.setItem('musicOn', musicOn ? 'on' : 'off');
+  updateMusicBtn();
+  if (musicOn && !running) startMusic(); else stopMusic();
+});
+
+// პირველ ჟესტზე ვრთავთ აუდიოს და, თუ მენიუზე ვართ — ფონურ მუსიკას
+function ensureMenuMusic(e) {
+  initAudio();
+  if (e && e.target && e.target.closest && e.target.closest('button')) return; // ღილაკებს თავად აქვთ ლოგიკა
+  if (!running && musicOn) startMusic();
+}
+window.addEventListener('pointerdown', ensureMenuMusic);
+window.addEventListener('keydown', ensureMenuMusic);
+
+// ---- მართვა: მაუსი / შეხება ----
+function pointerToLogicalX(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  return (clientX - rect.left) / scale;
+}
+function movePlayer(clientX) {
+  let x = pointerToLogicalX(clientX) - PADDLE_W/2;
+  targetX = Math.max(0, Math.min(W - PADDLE_W, x));
+}
+canvas.addEventListener('pointerdown', e => movePlayer(e.clientX));
+canvas.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch') movePlayer(e.clientX); });
+// კლავიატურა (დესკტოპისთვის)
+const keys = {};
+window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keyup',   e => keys[e.key] = false);
+
+// ---- AI ----
+function updateAI() {
+  // ბურთს მიჰყვება, მაგრამ შეზღუდული სისწრაფით (რომ დასამარცხებელი იყოს)
+  const center = ai.x + PADDLE_W/2;
+  const diff = ball.x - center;
+  const maxAiSpeed = 7.5;
+  // მხოლოდ მაშინ რეაგირებს აქტიურად, როცა ბურთი მისკენ მოდის
+  const react = ball.vy < 0 ? 1 : 0.35;
+  ai.x += Math.max(-maxAiSpeed, Math.min(maxAiSpeed, diff * 0.12 * react));
+  ai.x = Math.max(0, Math.min(W - PADDLE_W, ai.x));
+}
+
+// ---- ფიზიკა ----
+function update() {
+  // მოთამაშის გლუვი მოძრაობა
+  if (keys['ArrowLeft'])  targetX -= 9;
+  if (keys['ArrowRight']) targetX += 9;
+  targetX = Math.max(0, Math.min(W - PADDLE_W, targetX));
+  player.x += (targetX - player.x) * 0.35;
+
+  updateAI();
+
+  // ეფექტების ჩაქრობა
+  shake *= 0.85;
+  if (rallyPop > 0) rallyPop -= 0.08;
+
+  // მიკრო-პაუზა დარტყმის შემდეგ — ბურთი მოკლედ იყინება
+  if (hitStop > 0) { hitStop--; return; }
+
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // ბურთის კვალი
+  trail.push({ x: ball.x, y: ball.y });
+  if (trail.length > 14) trail.shift();
+
+  // გვერდითი კედლები
+  if (ball.x < BALL/2) { ball.x = BALL/2; ball.vx *= -1; sfx.wall(); }
+  if (ball.x > W - BALL/2) { ball.x = W - BALL/2; ball.vx *= -1; sfx.wall(); }
+
+  // ქვედა რაკეტთან შეჯახება (მოთამაშე)
+  if (ball.vy > 0 && ball.y + BALL/2 >= player.y - PADDLE_H/2 &&
+      ball.y < player.y &&
+      ball.x > player.x - BALL/2 && ball.x < player.x + PADDLE_W + BALL/2) {
+    bounce(player);
+  }
+  // ზედა რაკეტთან შეჯახება (AI)
+  if (ball.vy < 0 && ball.y - BALL/2 <= ai.y + PADDLE_H/2 &&
+      ball.y > ai.y &&
+      ball.x > ai.x - BALL/2 && ball.x < ai.x + PADDLE_W + BALL/2) {
+    bounce(ai);
+  }
+
+  // ქულა
+  if (ball.y < -BALL) { scoreP++; pointLog.push('P'); shake = 12; sfx.score(); check(1); }
+  if (ball.y > H + BALL) { scoreA++; pointLog.push('A'); shake = 12; sfx.score(); check(-1); }
+}
+
+function bounce(p) {
+  // დარტყმის წერტილის მიხედვით კუთხის გამოთვლა
+  const hit = (ball.x - (p.x + PADDLE_W/2)) / (PADDLE_W/2); // -1..1
+  ball.speed = Math.min(MAX_SPEED, ball.speed + SPEED_STEP);
+  const dir = p === player ? -1 : 1; // ქვედა -> ზემოთ, ზედა -> ქვემოთ
+  const angle = hit * 0.9; // მაქს. კუთხე
+  ball.vx = Math.sin(angle) * ball.speed;
+  ball.vy = dir * Math.cos(angle) * ball.speed;
+  ball.y += dir * 4; // რომ არ ჩარჩეს
+
+  rally++;                              // გაცვლა გაიზარდა
+  if (rally > bestRally) bestRally = rally;
+  rallyPop = 1;                         // მთვლელის პულსი
+  sfx.paddle();                         // ტონი rally-ს მიხედვით მაღლდება
+  shake = Math.min(14, 4 + ball.speed * 0.5); // შერყევა სიჩქარეზე
+  hitStop = 2;                          // მიკრო-პაუზა
+}
+
+function check(dir) {
+  if (scoreP >= WIN_SCORE) { endGame('შენ მოიგე! 🏆'); return; }
+  if (scoreA >= WIN_SCORE) { endGame('წააგე'); return; }
+  resetBall(dir);
+}
+
+// ---- დახატვა ----
+// rally-ს მიხედვით "სითბო": 0 = თეთრი, მაღალი = ცხელი ნარინჯისფერი/წითელი
+function heatColor(alpha) {
+  const h = Math.min(rally / 20, 1); // 0..1
+  const r = 255;
+  const g = Math.round(255 - h * 140);
+  const b = Math.round(255 - h * 235);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function draw() {
+  ctx.save();
+  // ეკრანის შერყევა
+  if (shake > 0.3) {
+    ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+  }
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(-20, -20, W + 40, H + 40);
+
+  // rally-ს მიხედვით მოედანი ოდნავ "თბება" (კიდეების ნათება)
+  const glow = Math.min(rally / 24, 1);
+  if (glow > 0.01) {
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, heatColor(0.10 * glow));
+    g.addColorStop(0.5, 'rgba(0,0,0,0)');
+    g.addColorStop(1, heatColor(0.10 * glow));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // შუა ჰორიზონტალური ხაზი (წყვეტილი)
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([12, 14]);
+  ctx.beginPath();
+  ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // rally-მთვლელი ცენტრში (დიდი, გამჭვირვალე, პულსით)
+  if (running && rally > 0) {
+    const pop = 1 + Math.max(0, rallyPop) * 0.25;
+    ctx.save();
+    ctx.translate(W/2, H/2);
+    ctx.scale(pop, pop);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = heatColor(0.16 + glow * 0.12);
+    ctx.font = '800 150px sans-serif';
+    ctx.fillText(rally, 0, 54);
+    ctx.restore();
+  }
+
+  // ანგარიში გვერდზე (მარცხენა კიდე, შუაში)
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.font = '600 40px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(scoreA, 18, H/2 - 24);  // AI (ზედა)
+  ctx.fillText(scoreP, 18, H/2 + 56);  // მოთამაშე (ქვედა)
+
+  // ბურთის კვალი (motion trail)
+  for (let i = 0; i < trail.length; i++) {
+    const a = (i / trail.length) * 0.5;
+    const s = BALL * (0.4 + 0.6 * i / trail.length);
+    ctx.fillStyle = heatColor(a);
+    ctx.fillRect(trail[i].x - s/2, trail[i].y - s/2, s, s);
+  }
+
+  // რაკეტები
+  ctx.fillStyle = '#fff';
+  roundRect(ai.x, ai.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+  roundRect(player.x, player.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+
+  // ბურთი (კვადრატი) — rally-სთან ერთად ანთდება
+  ctx.shadowColor = heatColor(0.9);
+  ctx.shadowBlur = 8 + glow * 22;
+  ctx.fillStyle = heatColor(1);
+  ctx.fillRect(ball.x - BALL/2, ball.y - BALL/2, BALL, BALL);
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.fill();
+}
+
+// ---- ციკლი ----
+function loop() {
+  if (running) update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+// ---- PWA: service worker-ის რეგისტრაცია ----
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
