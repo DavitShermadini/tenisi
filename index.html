@@ -477,8 +477,9 @@ function movePlayer(clientX) {
   let x = pointerToLogicalX(clientX) - PADDLE_W/2;
   targetX = Math.max(0, Math.min(W - PADDLE_W, x));
 }
-canvas.addEventListener('pointerdown', e => movePlayer(e.clientX));
-canvas.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'touch') movePlayer(e.clientX); });
+// მართვა მთელ ეკრანზე (canvas-ის გარეთ letterbox-შიც) — რაკეტის ქვემოთ შეხებაც მუშაობს
+window.addEventListener('pointerdown', e => { if (running) movePlayer(e.clientX); });
+window.addEventListener('pointermove', e => { if (running && (e.buttons || e.pointerType === 'touch')) movePlayer(e.clientX); });
 // კლავიატურა (დესკტოპისთვის)
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key] = true);
