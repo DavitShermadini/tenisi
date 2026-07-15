@@ -73,6 +73,19 @@
     cursor: pointer; backdrop-filter: blur(2px);
   }
   #musicBtn:active { transform: scale(.95); }
+
+  /* landscape (დაბალი სიმაღლე) — ტექსტი/ღილაკები კომპაქტურად, რომ ჩაეტიოს */
+  #overlay { overflow-y: auto; padding: 10px; }
+  @media (orientation: landscape) and (max-height: 520px) {
+    #overlay { gap: 8px; }
+    #overlay h1 { font-size: 19px; letter-spacing: .3px; }
+    #overlay p  { font-size: 12.5px; max-width: 78vw; line-height: 1.35; }
+    #overlay button { margin-top: 2px; padding: 8px 22px; font-size: 15px; }
+    #overlay button.ghost { padding: 6px 16px; font-size: 12.5px; }
+    #grid { font-size: 16px; letter-spacing: 2px; line-height: 1.15; max-width: 80vw; }
+    #musicBtn, #soundBtn { top: 8px; padding: 5px 10px; font-size: 12px; }
+    #musicBtn { left: 8px; } #soundBtn { right: 8px; }
+  }
 </style>
 </head>
 <body>
@@ -111,6 +124,9 @@ function resize() {
   ctx.setTransform(devicePixelRatio * scale, 0, 0, devicePixelRatio * scale, 0, 0);
 }
 window.addEventListener('resize', resize);
+// ტელეფონის გადატრიალება — ზოგი ბრაუზერი მალევე ძველ ზომას აბრუნებს, ამიტომ ვიმეორებთ
+window.addEventListener('orientationchange', () => { resize(); setTimeout(resize, 250); });
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);
 resize();
 
 // ---- თამაშის ობიექტები ----
