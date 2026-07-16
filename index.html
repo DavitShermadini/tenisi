@@ -57,6 +57,19 @@
   }
   #grid:empty { display: none; }
   .hidden { display: none !important; }
+  /* რეჟიმის/მხარის segmented ღილაკები */
+  .seg-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .seg-label { color: rgba(255,255,255,0.6); font-size: 14px; }
+  .seg {
+    padding: 9px 16px; font-size: 14px; font-weight: 600;
+    background: rgba(255,255,255,0.08); color: #fff;
+    border: 1px solid rgba(255,255,255,0.3); border-radius: 22px;
+    cursor: pointer; transition: background .15s, border-color .15s;
+  }
+  .seg:active { transform: scale(.96); }
+  .seg.on { background: #fff; color: #000; border-color: #fff; }
+  .rec { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 2px; }
+  .rec:empty { display: none; }
   #soundBtn {
     position: absolute; top: 14px; right: 14px; z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -85,6 +98,9 @@
     #grid { font-size: 16px; letter-spacing: 2px; line-height: 1.15; max-width: 80vw; }
     #musicBtn, #soundBtn { top: 8px; padding: 5px 10px; font-size: 12px; }
     #musicBtn { left: 8px; } #soundBtn { right: 8px; }
+    .seg { padding: 6px 12px; font-size: 12.5px; }
+    .seg-label { font-size: 12px; }
+    .rec { font-size: 11px; }
   }
 </style>
 </head>
@@ -95,10 +111,20 @@
   <button id="soundBtn" title="ხმის გადართვა">🔊 რეტრო</button>
   <div id="overlay">
     <h1>ტ ე ნ ი ს ი</h1>
-    <p>გადაატარე თითი ან მაუსი, რომ ქვედა რაკეტი ამოძრავო. დაიჭირე ბურთი და დააბრუნე. 7 ქულა იმარჯვებს.</p>
+    <p id="subtitle"></p>
+    <div id="modeRow" class="seg-row">
+      <button class="seg" data-mode="cpu">🤖 კომპიუტერთან</button>
+      <button class="seg" data-mode="duo">✋🤚 ორი ხელით</button>
+    </div>
+    <div id="sideRow" class="seg-row">
+      <span class="seg-label">შენი მხარე:</span>
+      <button class="seg" data-side="bottom">⬇️ ქვედა</button>
+      <button class="seg" data-side="top">⬆️ ზედა</button>
+    </div>
     <div id="grid"></div>
     <button id="startBtn">დაწყება</button>
     <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+    <p id="recLine" class="rec"></p>
   </div>
 </div>
 
@@ -142,13 +168,21 @@ const PADDLE_MARGIN = 40;    // მანძილი კიდიდან
 const BALL = 16;             // კვადრატის გვერდი
 const WIN_SCORE = 7;
 
-const player = { x: W/2 - PADDLE_W/2, y: H - PADDLE_MARGIN };   // ქვედა (მოთამაშე)
-const ai     = { x: W/2 - PADDLE_W/2, y: PADDLE_MARGIN };       // ზედა (ალგორითმი)
+const pBottom = { x: W/2 - PADDLE_W/2, y: H - PADDLE_MARGIN, target: W/2 - PADDLE_W/2 }; // ქვედა რაკეტი
+const pTop    = { x: W/2 - PADDLE_W/2, y: PADDLE_MARGIN,     target: W/2 - PADDLE_W/2 }; // ზედა რაკეტი
 
 let ball = { x: W/2, y: H/2, vx: 0, vy: 0, speed: 0 };
-let scoreP = 0, scoreA = 0;
+let scoreP = 0, scoreA = 0; // scoreP = ქვედა მხარის ქულა, scoreA = ზედა მხარის ქულა
 let running = false;
-let targetX = player.x; // მოთამაშის სამიზნე პოზიცია (გლუვი მოძრაობისთვის)
+
+// ---- რეჟიმი და მხარე ----
+let mode = localStorage.getItem('mode') || 'cpu';               // 'cpu' (კომპიუტერთან) | 'duo' (ორი ხელით)
+let playerSide = localStorage.getItem('playerSide') || 'bottom'; // cpu-ში რომელ რაკეტს მართავ: 'bottom' | 'top'
+const pointerAssign = {}; // pointerId -> რომელ რაკეტს მართავს ეს თითი (multi-touch)
+
+// დამხმარეები: ვინ არის მოთამაშე/AI cpu რეჟიმში
+function humanPaddle() { return playerSide === 'bottom' ? pBottom : pTop; }
+function aiPaddle()    { return playerSide === 'bottom' ? pTop : pBottom; }
 
 // ---- Rally + juice state ----
 let rally = 0;        // მიმდინარე გაცვლის სიგრძე (რამდენჯერ დაარტყეს ცდომის გარეშე)
@@ -389,8 +423,9 @@ function startGame() {
   initAudio(); // მომხმარებლის ჟესტზე ვრთავთ აუდიოს
   scoreP = 0; scoreA = 0;
   bestRally = 0; pointLog = [];
-  player.x = ai.x = W/2 - PADDLE_W/2;
-  targetX = player.x;
+  pBottom.x = pBottom.target = W/2 - PADDLE_W/2;
+  pTop.x = pTop.target = W/2 - PADDLE_W/2;
+  for (const k in pointerAssign) delete pointerAssign[k];
   resetBall();
   running = true;
   stopMusic(); // თამაშის დროს ფონი ჩუმდება — მხოლოდ sfx რჩება
@@ -410,19 +445,28 @@ function buildGrid() {
 
 function endGame(msg) {
   running = false;
-  const won = scoreP > scoreA;
+  // ანგარიში „შენი" პერსპექტივიდან (duo-ში ქვედა:ზედა)
+  const you = (mode === 'duo' || playerSide === 'bottom') ? scoreP : scoreA;
+  const opp = (mode === 'duo' || playerSide === 'bottom') ? scoreA : scoreP;
+  const won = you > opp;
   const grid = buildGrid();
   gridEl.textContent = grid;
 
+  // პირადი რეკორდი — ყველაზე გრძელი გაცვლა (ლოკალურად)
+  const rec = Math.max(bestRally, +(localStorage.getItem('bestRallyEver') || 0));
+  localStorage.setItem('bestRallyEver', rec);
+
   overlay.querySelector('h1').textContent = msg;
-  overlay.querySelector('p').textContent =
-    `ანგარიში ${scoreP} : ${scoreA}  •  🔥 საუკეთესო გაცვლა: ${bestRally}`;
+  overlay.querySelector('#subtitle').textContent =
+    `ანგარიში ${you} : ${opp}  •  🔥 საუკეთესო გაცვლა: ${bestRally}`;
   startBtn.textContent = '↻ კიდევ ერთხელ';
   shareBtn.classList.remove('hidden');
+  updateRecLine();
 
   // გასაზიარებელი ტექსტი (Wordle-ის სტილში)
+  const tag = mode === 'duo' ? 'ორი ხელით' : (won ? '🏆' : '❌');
   lastResult =
-    `🏓 ტენისი — ${scoreP}:${scoreA} ${won ? '🏆' : '❌'}\n` +
+    `🏓 ტენისი — ${you}:${opp} ${tag}\n` +
     `${grid}\n` +
     `🔥 საუკეთესო გაცვლა: ${bestRally}\n` +
     location.href;
@@ -432,6 +476,40 @@ function endGame(msg) {
 }
 
 startBtn.addEventListener('click', startGame);
+
+// ---- მენიუ: რეჟიმი / მხარე / რეკორდი ----
+const modeRow = document.getElementById('modeRow');
+const sideRow = document.getElementById('sideRow');
+const subtitleEl = document.getElementById('subtitle');
+const recLineEl = document.getElementById('recLine');
+
+function subtitleText() {
+  return mode === 'cpu'
+    ? 'გადაატარე თითი, რომ შენი რაკეტი ამოძრავო. 7 ქულა იმარჯვებს.'
+    : 'ორი ხელით ითამაშე: ქვედა ნახევარი — ქვედა რაკეტი, ზედა ნახევარი — ზედა. 7 ქულა.';
+}
+function updateRecLine() {
+  const r = +(localStorage.getItem('bestRallyEver') || 0);
+  recLineEl.textContent = r > 0 ? `🔥 შენი რეკორდ-გაცვლა: ${r}` : '';
+}
+function updateMenuUI(withSubtitle) {
+  modeRow.querySelectorAll('.seg').forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  sideRow.querySelectorAll('.seg').forEach(b => b.classList.toggle('on', b.dataset.side === playerSide));
+  sideRow.classList.toggle('hidden', mode !== 'cpu'); // duo-ში მხარის არჩევა არ ჭირდება
+  if (withSubtitle) subtitleEl.textContent = subtitleText();
+}
+modeRow.addEventListener('click', e => {
+  const b = e.target.closest('.seg'); if (!b) return;
+  mode = b.dataset.mode; localStorage.setItem('mode', mode);
+  updateMenuUI(true);
+});
+sideRow.addEventListener('click', e => {
+  const b = e.target.closest('.seg'); if (!b) return;
+  playerSide = b.dataset.side; localStorage.setItem('playerSide', playerSide);
+  updateMenuUI(true);
+});
+updateMenuUI(true);
+updateRecLine();
 
 // ---- შედეგის გაზიარება ----
 shareBtn.addEventListener('click', async () => {
@@ -490,49 +568,78 @@ function ensureMenuMusic(e) {
 window.addEventListener('pointerdown', ensureMenuMusic);
 window.addEventListener('keydown', ensureMenuMusic);
 
-// ---- მართვა: მაუსი / შეხება ----
-// პოინტერიდან ველის X — canvas-ის ცენტრის მიმართ, ორიენტაციის გათვალისწინებით
-function pointerToFieldX(clientX, clientY) {
+// ---- მართვა: მაუსი / შეხება (multi-touch) ----
+// პოინტერიდან ველის კოორდინატები — canvas-ის ცენტრის მიმართ, ორიენტაციის გათვალისწინებით
+function pointerToField(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  const cx = rect.left + rect.width / 2;
-  const cy = rect.top + rect.height / 2;
-  // landscape-ში ველი 90°-ითაა, ამიტომ ეკრანის ვერტიკალური სვლა = ველის X
-  const local = (fieldRotation === 90) ? (clientY - cy) : (clientX - cx);
-  return W / 2 + local / scale;
+  const dx = clientX - (rect.left + rect.width / 2);
+  const dy = clientY - (rect.top + rect.height / 2);
+  let lx, ly;
+  if (fieldRotation === 90) { lx = dy; ly = -dx; } // landscape: ეკრანის ღერძები გაცვლილია
+  else { lx = dx; ly = dy; }
+  return { x: W / 2 + lx / scale, y: H / 2 + ly / scale };
 }
-function movePlayer(clientX, clientY) {
-  const x = pointerToFieldX(clientX, clientY) - PADDLE_W/2;
-  targetX = Math.max(0, Math.min(W - PADDLE_W, x));
+// რომელ რაკეტს ეკუთვნის ეს შეხება
+function pickPaddle(f) {
+  if (mode === 'cpu') return humanPaddle();
+  return f.y < H / 2 ? pTop : pBottom; // duo: ზედა ნახევარი → ზედა, ქვედა → ქვედა
 }
-// მართვა მთელ ეკრანზე (canvas-ის გარეთ letterbox-შიც) — რაკეტის ქვემოთ შეხებაც მუშაობს
-window.addEventListener('pointerdown', e => { if (running) movePlayer(e.clientX, e.clientY); });
-window.addEventListener('pointermove', e => { if (running && (e.buttons || e.pointerType === 'touch')) movePlayer(e.clientX, e.clientY); });
+function setPaddleTarget(p, fx) {
+  p.target = Math.max(0, Math.min(W - PADDLE_W, fx - PADDLE_W / 2));
+}
+window.addEventListener('pointerdown', e => {
+  if (!running) return;
+  const f = pointerToField(e.clientX, e.clientY);
+  const p = pickPaddle(f);
+  pointerAssign[e.pointerId] = p;
+  setPaddleTarget(p, f.x);
+});
+window.addEventListener('pointermove', e => {
+  if (!running) return;
+  let p = pointerAssign[e.pointerId];
+  if (!p) { if (!(e.buttons || e.pointerType === 'touch')) return; p = pickPaddle(pointerToField(e.clientX, e.clientY)); }
+  setPaddleTarget(p, pointerToField(e.clientX, e.clientY).x);
+});
+window.addEventListener('pointerup',     e => { delete pointerAssign[e.pointerId]; });
+window.addEventListener('pointercancel', e => { delete pointerAssign[e.pointerId]; });
 // კლავიატურა (დესკტოპისთვის)
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key] = true);
 window.addEventListener('keyup',   e => keys[e.key] = false);
 
 // ---- AI ----
-function updateAI() {
+function updateAI(p) {
   // ბურთს მიჰყვება, მაგრამ შეზღუდული სისწრაფით (რომ დასამარცხებელი იყოს)
-  const center = ai.x + PADDLE_W/2;
+  const center = p.x + PADDLE_W/2;
   const diff = ball.x - center;
   const maxAiSpeed = 7.5;
   // მხოლოდ მაშინ რეაგირებს აქტიურად, როცა ბურთი მისკენ მოდის
-  const react = ball.vy < 0 ? 1 : 0.35;
-  ai.x += Math.max(-maxAiSpeed, Math.min(maxAiSpeed, diff * 0.12 * react));
-  ai.x = Math.max(0, Math.min(W - PADDLE_W, ai.x));
+  const toward = (p === pTop) ? ball.vy < 0 : ball.vy > 0;
+  const react = toward ? 1 : 0.35;
+  p.x += Math.max(-maxAiSpeed, Math.min(maxAiSpeed, diff * 0.12 * react));
+  p.x = Math.max(0, Math.min(W - PADDLE_W, p.x));
+  p.target = p.x; // lerp არ ჩაერიოს
 }
 
 // ---- ფიზიკა ----
 function update() {
-  // მოთამაშის გლუვი მოძრაობა
-  if (keys['ArrowLeft'])  targetX -= 9;
-  if (keys['ArrowRight']) targetX += 9;
-  targetX = Math.max(0, Math.min(W - PADDLE_W, targetX));
-  player.x += (targetX - player.x) * 0.35;
+  // კლავიატურა (დესკტოპი): cpu-ში მოთამაშის რაკეტი; duo-ში ←/→ ქვედა, A/D ზედა
+  const kb = (mode === 'cpu') ? humanPaddle() : pBottom;
+  if (keys['ArrowLeft'])  kb.target -= 9;
+  if (keys['ArrowRight']) kb.target += 9;
+  if (mode === 'duo') {
+    if (keys['a'] || keys['A']) pTop.target -= 9;
+    if (keys['d'] || keys['D']) pTop.target += 9;
+  }
 
-  updateAI();
+  // AI მხოლოდ cpu რეჟიმში მართავს ერთ რაკეტს
+  if (mode === 'cpu') updateAI(aiPaddle());
+
+  // ორივე რაკეტის გლუვი მოძრაობა target-ისკენ
+  pBottom.target = Math.max(0, Math.min(W - PADDLE_W, pBottom.target));
+  pTop.target    = Math.max(0, Math.min(W - PADDLE_W, pTop.target));
+  pBottom.x += (pBottom.target - pBottom.x) * 0.35;
+  pTop.x    += (pTop.target - pTop.x) * 0.35;
 
   // ეფექტების ჩაქრობა
   shake *= 0.85;
@@ -552,29 +659,35 @@ function update() {
   if (ball.x < BALL/2) { ball.x = BALL/2; ball.vx *= -1; sfx.wall(); }
   if (ball.x > W - BALL/2) { ball.x = W - BALL/2; ball.vx *= -1; sfx.wall(); }
 
-  // ქვედა რაკეტთან შეჯახება (მოთამაშე)
-  if (ball.vy > 0 && ball.y + BALL/2 >= player.y - PADDLE_H/2 &&
-      ball.y < player.y &&
-      ball.x > player.x - BALL/2 && ball.x < player.x + PADDLE_W + BALL/2) {
-    bounce(player);
+  // ქვედა რაკეტთან შეჯახება
+  if (ball.vy > 0 && ball.y + BALL/2 >= pBottom.y - PADDLE_H/2 &&
+      ball.y < pBottom.y &&
+      ball.x > pBottom.x - BALL/2 && ball.x < pBottom.x + PADDLE_W + BALL/2) {
+    bounce(pBottom);
   }
-  // ზედა რაკეტთან შეჯახება (AI)
-  if (ball.vy < 0 && ball.y - BALL/2 <= ai.y + PADDLE_H/2 &&
-      ball.y > ai.y &&
-      ball.x > ai.x - BALL/2 && ball.x < ai.x + PADDLE_W + BALL/2) {
-    bounce(ai);
+  // ზედა რაკეტთან შეჯახება
+  if (ball.vy < 0 && ball.y - BALL/2 <= pTop.y + PADDLE_H/2 &&
+      ball.y > pTop.y &&
+      ball.x > pTop.x - BALL/2 && ball.x < pTop.x + PADDLE_W + BALL/2) {
+    bounce(pTop);
   }
 
-  // ქულა
-  if (ball.y < -BALL) { scoreP++; pointLog.push('P'); shake = 12; sfx.score(); check(1); }
-  if (ball.y > H + BALL) { scoreA++; pointLog.push('A'); shake = 12; sfx.score(); check(-1); }
+  // ქულა (ball.y < 0 → ზედა რაკეტმა გააცდინა → ქვედა მხარეს ემატება)
+  if (ball.y < -BALL)   { scoreP++; logPoint('bottom'); shake = 12; sfx.score(); check(1); }
+  if (ball.y > H + BALL) { scoreA++; logPoint('top');    shake = 12; sfx.score(); check(-1); }
+}
+
+// ქულის ჩაწერა emoji-ბადეში „შენი" პერსპექტივიდან (duo-ში — ქვედას პერსპექტივა)
+function logPoint(sideScored) {
+  const yours = (mode === 'duo') ? (sideScored === 'bottom') : (sideScored === playerSide);
+  pointLog.push(yours ? 'P' : 'A');
 }
 
 function bounce(p) {
   // დარტყმის წერტილის მიხედვით კუთხის გამოთვლა
   const hit = (ball.x - (p.x + PADDLE_W/2)) / (PADDLE_W/2); // -1..1
   ball.speed = Math.min(MAX_SPEED, ball.speed + SPEED_STEP);
-  const dir = p === player ? -1 : 1; // ქვედა -> ზემოთ, ზედა -> ქვემოთ
+  const dir = (p.y > H/2) ? -1 : 1; // ქვედა რაკეტი -> ზემოთ, ზედა -> ქვემოთ
   const angle = hit * 0.9; // მაქს. კუთხე
   ball.vx = Math.sin(angle) * ball.speed;
   ball.vy = dir * Math.cos(angle) * ball.speed;
@@ -589,8 +702,18 @@ function bounce(p) {
 }
 
 function check(dir) {
-  if (scoreP >= WIN_SCORE) { endGame('შენ მოიგე! 🏆'); return; }
-  if (scoreA >= WIN_SCORE) { endGame('წააგე'); return; }
+  if (scoreP >= WIN_SCORE || scoreA >= WIN_SCORE) {
+    let msg;
+    if (mode === 'duo') {
+      msg = scoreP > scoreA ? '⬇️ ქვედა მოიგო! 🏆' : '⬆️ ზედა მოიგო! 🏆';
+    } else {
+      const you = playerSide === 'bottom' ? scoreP : scoreA;
+      const opp = playerSide === 'bottom' ? scoreA : scoreP;
+      msg = you > opp ? 'შენ მოიგე! 🏆' : 'წააგე';
+    }
+    endGame(msg);
+    return;
+  }
   resetBall(dir);
 }
 
@@ -663,8 +786,8 @@ function draw() {
 
   // რაკეტები
   ctx.fillStyle = '#fff';
-  roundRect(ai.x, ai.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
-  roundRect(player.x, player.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+  roundRect(pTop.x, pTop.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+  roundRect(pBottom.x, pBottom.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
 
   // ბურთი (კვადრატი) — rally-სთან ერთად ანთდება
   ctx.shadowColor = heatColor(0.9);
