@@ -111,14 +111,20 @@ const startBtn = document.getElementById('startBtn');
 // ---- ლოგიკური ზომები (ვირტუალური კოორდინატები) ----
 // ვთამაშობთ 600x900 ველზე, შემდეგ ვამასშტაბებთ ეკრანზე.
 const W = 600, H = 900;
-let scale = 1, offX = 0, offY = 0;
+let scale = 1;
+let fieldRotation = 0; // 0 = portrait; 90 = landscape (ველი გადატრიალებული, რომ ადგილზე დარჩეს)
 
 function resize() {
   const vw = window.innerWidth, vh = window.innerHeight;
-  scale = Math.min(vw / W, vh / H);
+  const landscape = vw > vh;
+  fieldRotation = landscape ? 90 : 0;
+  // landscape-ში ველი 90°-ით ტრიალდება, ამიტომ მასშტაბს გაცვლილ განზომილებებზე ვითვლით
+  // → ველი ზუსტად იმავე ზომაზე რჩება, როგორც portrait-ში
+  scale = landscape ? Math.min(vw / H, vh / W) : Math.min(vw / W, vh / H);
   const cw = W * scale, ch = H * scale;
   canvas.style.width = cw + 'px';
   canvas.style.height = ch + 'px';
+  canvas.style.transform = landscape ? 'rotate(90deg)' : 'none';
   canvas.width = Math.round(cw * devicePixelRatio);
   canvas.height = Math.round(ch * devicePixelRatio);
   ctx.setTransform(devicePixelRatio * scale, 0, 0, devicePixelRatio * scale, 0, 0);
@@ -485,17 +491,22 @@ window.addEventListener('pointerdown', ensureMenuMusic);
 window.addEventListener('keydown', ensureMenuMusic);
 
 // ---- მართვა: მაუსი / შეხება ----
-function pointerToLogicalX(clientX) {
+// პოინტერიდან ველის X — canvas-ის ცენტრის მიმართ, ორიენტაციის გათვალისწინებით
+function pointerToFieldX(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
-  return (clientX - rect.left) / scale;
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  // landscape-ში ველი 90°-ითაა, ამიტომ ეკრანის ვერტიკალური სვლა = ველის X
+  const local = (fieldRotation === 90) ? (clientY - cy) : (clientX - cx);
+  return W / 2 + local / scale;
 }
-function movePlayer(clientX) {
-  let x = pointerToLogicalX(clientX) - PADDLE_W/2;
+function movePlayer(clientX, clientY) {
+  const x = pointerToFieldX(clientX, clientY) - PADDLE_W/2;
   targetX = Math.max(0, Math.min(W - PADDLE_W, x));
 }
 // მართვა მთელ ეკრანზე (canvas-ის გარეთ letterbox-შიც) — რაკეტის ქვემოთ შეხებაც მუშაობს
-window.addEventListener('pointerdown', e => { if (running) movePlayer(e.clientX); });
-window.addEventListener('pointermove', e => { if (running && (e.buttons || e.pointerType === 'touch')) movePlayer(e.clientX); });
+window.addEventListener('pointerdown', e => { if (running) movePlayer(e.clientX, e.clientY); });
+window.addEventListener('pointermove', e => { if (running && (e.buttons || e.pointerType === 'touch')) movePlayer(e.clientX, e.clientY); });
 // კლავიატურა (დესკტოპისთვის)
 const keys = {};
 window.addEventListener('keydown', e => keys[e.key] = true);
