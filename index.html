@@ -330,6 +330,15 @@ function startCountdown(first) {
   countdownUntil = performance.now() + (first ? 2600 : 900);
   lastTick = -1;
 }
+// fullscreen — აპში manifest აკეთებს; ბრაუზერში ჟესტზე ვცდით
+function goFullscreen() {
+  const standalone = navigator.standalone ||
+    matchMedia('(display-mode: standalone)').matches ||
+    matchMedia('(display-mode: fullscreen)').matches;
+  if (standalone) return; // აპში უკვე fullscreen-ია
+  const el = document.documentElement;
+  if (!document.fullscreenElement && el.requestFullscreen) el.requestFullscreen().catch(() => {});
+}
 let hitStop = 0;      // მიკრო-პაუზა დარტყმაზე (ხდის დარტყმას "წონიანს")
 let rallyPop = 0;     // rally-მთვლელის პულსაცია
 
@@ -563,6 +572,7 @@ function resetBall(dir, first) {
 
 function startGame() {
   initAudio(); // მომხმარებლის ჟესტზე ვრთავთ აუდიოს
+  goFullscreen();
   scoreP = 0; scoreA = 0;
   bestRally = 0; pointLog = [];
   pBottom.x = pBottom.target = W/2 - PADDLE_W/2;
