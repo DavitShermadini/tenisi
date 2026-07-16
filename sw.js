@@ -1,5 +1,5 @@
 // Service Worker — offline ქეში
-const CACHE = 'tenisi-v2';
+const CACHE = 'tenisi-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -28,9 +28,11 @@ self.addEventListener('activate', e => {
 // სტატიკური ფაილები (აიქონი, manifest) — cache-first (სწრაფი).
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // HTML და manifest — network-first (ცვლილებები მაშინვე ჩანს, მაგ. orientation)
   const isDoc = e.request.mode === 'navigate' ||
                 e.request.destination === 'document' ||
-                e.request.url.endsWith('.html');
+                e.request.url.endsWith('.html') ||
+                e.request.url.endsWith('.webmanifest');
 
   if (isDoc) {
     e.respondWith(
