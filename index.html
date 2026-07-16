@@ -91,6 +91,7 @@
   .skin-seg[data-skin="neon"]   { border-color: #39f6ff; }
   .skin-seg[data-skin="gold"]   { border-color: #ffd54a; }
   .skin-seg[data-skin="matrix"] { border-color: #7dff5a; }
+  .skin-seg[data-skin="zima"]   { border-color: #4fc3f0; }
 
   /* პროფილის პანელი */
   .panel {
@@ -99,10 +100,10 @@
     background: rgba(0,0,0,0.75); padding: 16px;
   }
   .panel-card {
-    position: relative; width: 100%; max-width: 340px;
+    position: relative; width: 100%; max-width: 380px;
     background: #111; border: 1px solid rgba(255,255,255,0.18);
-    border-radius: 18px; padding: 24px 20px;
-    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    border-radius: 18px; padding: 20px 18px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
     max-height: 92vh; overflow-y: auto;
   }
   .panel-card .x {
@@ -132,7 +133,7 @@
   .stat b { display: block; font-size: 22px; color: #fff; }
   .stat span { font-size: 11px; color: rgba(255,255,255,0.55); }
   .panel-card .hint { font-size: 11px; color: rgba(255,255,255,0.45); text-align: center; line-height: 1.4; }
-  .panel-title { font-size: 18px; color: #fff; font-weight: 600; }
+  .panel-title { font-size: 16px; color: #fff; font-weight: 600; }
   .panel-card .big { padding: 10px 22px; font-size: 14px; background:rgba(255,255,255,0.16); color:#fff; border:1.5px solid rgba(255,255,255,0.55); border-radius: 22px; cursor:pointer; font-weight:600; width:100%; }
   .or { color: rgba(255,255,255,0.4); font-size: 13px; margin: 4px 0; }
   .join-row { display:flex; gap:8px; width:100%; }
@@ -142,7 +143,7 @@
   }
   #joinCode:focus { outline:none; border-color: rgba(255,255,255,0.5); }
   .join-row button { padding:0 18px; font-size:14px; font-weight:600; background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.3); border-radius:12px; cursor:pointer; }
-  .room-code { font-size: 34px; font-weight: 800; letter-spacing: 6px; color:#fff; background:rgba(255,255,255,0.08); border-radius:12px; padding:12px 8px; margin:8px 0; }
+  .room-code { font-size: 27px; font-weight: 800; letter-spacing: 3px; color:#fff; background:rgba(255,255,255,0.08); border-radius:12px; padding:9px 8px; margin:4px 0; }
   .lobby-msg { font-size: 13px; color: rgba(255,255,255,0.7); }
   .lobby-status { font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 6px; }
   .lobby-err { font-size: 12px; color: #ff6b6b; min-height: 1px; text-align:center; }
@@ -165,6 +166,18 @@
   .lb-name { flex:1; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .lb-val { font-weight:700; color:#fff; font-size:15px; flex:none; }
   .lb-empty { color:rgba(255,255,255,0.5); font-size:13px; text-align:center; padding:16px; }
+  /* თამაშში გასვლის ღილაკი */
+  .ingame {
+    position:absolute; top:12px; right:12px; z-index:6;
+    width:36px; height:36px; border-radius:50%;
+    background:rgba(0,0,0,0.4); color:rgba(255,255,255,0.85);
+    border:1px solid rgba(255,255,255,0.3); font-size:15px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; backdrop-filter:blur(2px);
+  }
+  .ingame:active { transform:scale(.92); }
+  .pghost { background:transparent; color:rgba(255,255,255,0.75); border:1px solid rgba(255,255,255,0.3);
+    border-radius:22px; padding:9px 20px; font-size:13.5px; cursor:pointer; width:100%; }
+  .pghost:active { transform:scale(.97); }
   #soundBtn {
     position: absolute; top: 14px; right: 14px; z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -202,6 +215,7 @@
 <body>
 <div id="wrap">
   <canvas id="game"></canvas>
+  <button id="quitBtn" class="ingame hidden" title="გასვლა">✕</button>
   <div id="overlay">
     <h1>ტ ე ნ ი ს ი</h1>
     <p id="subtitle"></p>
@@ -233,6 +247,16 @@
     </nav>
   </div>
 
+  <!-- თამაშის შეწყვეტის დადასტურება -->
+  <div id="confirmQuit" class="panel hidden">
+    <div class="panel-card">
+      <h2 class="panel-title">თამაშის შეწყვეტა?</h2>
+      <p class="hint">შეწყვეტილი თამაში ჩაითვლება წაგებად. რეკორდული გაცვლა შენარჩუნდება.</p>
+      <button id="quitYes" class="big">დიახ, გავიდე</button>
+      <button id="quitNo" class="pghost">არა, გავაგრძელო</button>
+    </div>
+  </div>
+
   <!-- პარამეტრები -->
   <div id="settings" class="panel hidden">
     <div class="panel-card">
@@ -244,6 +268,7 @@
         <button class="seg skin-seg" data-skin="neon">ნეონი</button>
         <button class="seg skin-seg" data-skin="gold">ოქრო</button>
         <button class="seg skin-seg" data-skin="matrix">მატრიცა</button>
+        <button class="seg skin-seg" data-skin="zima">Zima</button>
       </div>
       <div class="seg-row">
         <span class="seg-label">ხმა:</span>
@@ -360,6 +385,7 @@ const pTop    = { x: W/2 - PADDLE_W/2, y: PADDLE_MARGIN,     target: W/2 - PADDL
 let ball = { x: W/2, y: H/2, vx: 0, vy: 0, speed: 0 };
 let scoreP = 0, scoreA = 0; // scoreP = ქვედა მხარის ქულა, scoreA = ზედა მხარის ქულა
 let running = false;
+let paused = false; // თამაშის შეწყვეტის დადასტურებისას
 
 // ---- რეჟიმი და მხარე ----
 let mode = localStorage.getItem('mode') || 'cpu';               // 'cpu' (კომპიუტერთან) | 'duo' (ორი ხელით)
@@ -371,6 +397,7 @@ const SKINS = {
   neon:    { paddle: '#39f6ff', ball: '#ff3df0', heat: false, sw: '#ff3df0' },
   gold:    { paddle: '#ffd54a', ball: '#ffb300', heat: false, sw: '#ffb300' },
   matrix:  { paddle: '#7dff5a', ball: '#00ff66', heat: false, sw: '#00ff66' },
+  zima:    { paddle: '#4fc3f0', ball: '#12a0e0', heat: false, sw: '#12a0e0' }, // Zima Blue-ს ინსპირაციით
 };
 const AI_PRESET = {
   easy:   { speed: 5.0,  follow: 0.08, passive: 0.20, err: 55 },
@@ -656,6 +683,8 @@ function startGame() {
   shareBtn.classList.add('hidden');
   leaveBtn.classList.add('hidden');
   gridEl.textContent = '';
+  paused = false;
+  document.getElementById('quitBtn').classList.remove('hidden'); // თამაშში გასვლის ღილაკი
   overlay.classList.add('hidden');
 }
 
@@ -697,6 +726,7 @@ function endGame(msg) {
     `🔥 საუკეთესო გაცვლა: ${bestRally}\n` +
     location.href;
 
+  document.getElementById('quitBtn').classList.add('hidden');
   overlay.classList.remove('hidden');
   startMusic(); // მენიუ დაბრუნდა — ფონური მუსიკა განახლდება
   if (online) { startBtn.textContent = '↻ რევანში'; leaveBtn.classList.remove('hidden'); } // online host
@@ -719,7 +749,8 @@ leaveBtn.addEventListener('click', () => {
 });
 // მენიუს საწყისი მდგომარეობა
 function showMenu() {
-  running = false;
+  running = false; paused = false;
+  document.getElementById('quitBtn').classList.add('hidden');
   overlay.querySelector('h1').textContent = 'ტ ე ნ ი ს ი';
   startBtn.textContent = 'დაწყება'; startBtn.classList.remove('hidden');
   leaveBtn.classList.add('hidden'); shareBtn.classList.add('hidden');
@@ -728,6 +759,32 @@ function showMenu() {
   overlay.classList.remove('hidden');
   startMusic();
 }
+
+// ---- თამაშის შეწყვეტა (გასვლა) ----
+const quitBtnEl = document.getElementById('quitBtn');
+const confirmQuitEl = document.getElementById('confirmQuit');
+quitBtnEl.addEventListener('click', () => {
+  if (!running) return;
+  if (!online) paused = true;             // offline — ვაჩერებთ სანამ დაადასტურებს
+  confirmQuitEl.classList.remove('hidden');
+});
+document.getElementById('quitNo').addEventListener('click', () => {
+  confirmQuitEl.classList.add('hidden');
+  paused = false;
+});
+document.getElementById('quitYes').addEventListener('click', () => {
+  confirmQuitEl.classList.add('hidden');
+  quitBtnEl.classList.add('hidden');
+  paused = false;
+  if (online) { // ონლაინ — გასვლა
+    try { online.conn && online.conn.send({ t: 'bye' }); } catch (e) {}
+    endOnline(); showMenu();
+    return;
+  }
+  running = false;
+  recordResult(false); // წაგებად ჩაითვლება, longestRally (რეკ. გაცვლა) შენარჩუნდება
+  showMenu();
+});
 
 // ---- მენიუ: რეჟიმი / მხარე / რეკორდი ----
 const modeRow = document.getElementById('modeRow');
@@ -1004,14 +1061,15 @@ function setPaddleTarget(p, fx) {
   p.target = Math.max(0, Math.min(W - PADDLE_W, fx - PADDLE_W / 2));
 }
 window.addEventListener('pointerdown', e => {
-  if (!running) return;
+  if (!running || paused) return;
+  if (e.target && e.target.closest && e.target.closest('button')) return; // ღილაკზე დაჭერამ რაკეტი არ ამოძრავოს
   const f = pointerToField(e.clientX, e.clientY);
   const p = pickPaddle(f);
   pointerAssign[e.pointerId] = p;
   setPaddleTarget(p, f.x);
 });
 window.addEventListener('pointermove', e => {
-  if (!running) return;
+  if (!running || paused) return;
   let p = pointerAssign[e.pointerId];
   if (!p) { if (!(e.buttons || e.pointerType === 'touch')) return; p = pickPaddle(pointerToField(e.clientX, e.clientY)); }
   setPaddleTarget(p, pointerToField(e.clientX, e.clientY).x);
@@ -1379,6 +1437,7 @@ function beginOnlineGuest() {
   online.connected = true; online.overShown = false; online.snap = null; closeLobby();
   mode = 'cpu';
   overlay.classList.add('hidden');
+  document.getElementById('quitBtn').classList.remove('hidden');
   running = false; // პირველ state-მდე
 }
 function onNetData(d) {
@@ -1488,7 +1547,7 @@ function loop() {
     }
     draw();
   } else {
-    if (running) update();
+    if (running && !paused) update();
     draw();
   }
   requestAnimationFrame(loop);
