@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="ტენისი">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -114,6 +115,21 @@
   .stat b { display: block; font-size: 22px; color: #fff; }
   .stat span { font-size: 11px; color: rgba(255,255,255,0.55); }
   .panel-card .hint { font-size: 11px; color: rgba(255,255,255,0.45); text-align: center; line-height: 1.4; }
+  .panel-title { font-size: 18px; color: #fff; font-weight: 600; }
+  .panel-card .big { padding: 14px 28px; font-size: 16px; background:#fff; color:#000; border:none; border-radius: 26px; cursor:pointer; font-weight:600; width:100%; }
+  .or { color: rgba(255,255,255,0.4); font-size: 13px; margin: 4px 0; }
+  .join-row { display:flex; gap:8px; width:100%; }
+  #joinCode {
+    flex:1; text-align:center; text-transform:uppercase; letter-spacing:2px; font-size:16px; font-weight:600;
+    background: rgba(255,255,255,0.08); color:#fff; border:1px solid rgba(255,255,255,0.2); border-radius:12px; padding:10px;
+  }
+  #joinCode:focus { outline:none; border-color: rgba(255,255,255,0.5); }
+  .join-row button { padding:0 18px; font-size:14px; font-weight:600; background:rgba(255,255,255,0.12); color:#fff; border:1px solid rgba(255,255,255,0.3); border-radius:12px; cursor:pointer; }
+  .room-code { font-size: 34px; font-weight: 800; letter-spacing: 6px; color:#fff; background:rgba(255,255,255,0.08); border-radius:12px; padding:12px 8px; margin:8px 0; }
+  .lobby-msg { font-size: 13px; color: rgba(255,255,255,0.7); }
+  .lobby-status { font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 6px; }
+  .lobby-err { font-size: 12px; color: #ff6b6b; min-height: 1px; text-align:center; }
+  #lobbyHome, #lobbyWait { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; }
   #soundBtn {
     position: absolute; top: 14px; right: 14px; z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -181,8 +197,32 @@
     <div id="grid"></div>
     <button id="startBtn">დაწყება</button>
     <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+    <button id="onlineBtn" class="ghost">🌐 მეგობართან ონლაინ (beta)</button>
     <button id="profileBtn" class="ghost">👤 პროფილი & რეკორდები</button>
     <p id="recLine" class="rec"></p>
+  </div>
+
+  <!-- ონლაინ ლობი -->
+  <div id="lobby" class="panel hidden">
+    <div class="panel-card">
+      <button id="lobbyClose" class="x">✕</button>
+      <h2 class="panel-title">🌐 მეგობართან ონლაინ</h2>
+      <div id="lobbyHome">
+        <button id="createRoomBtn" class="big">ოთახის შექმნა</button>
+        <div class="or">— ან —</div>
+        <div class="join-row">
+          <input id="joinCode" maxlength="8" placeholder="ოთახის კოდი" autocomplete="off">
+          <button id="joinRoomBtn">შეერთება</button>
+        </div>
+      </div>
+      <div id="lobbyWait" class="hidden">
+        <p class="lobby-msg">გაუზიარე მეგობარს კოდი:</p>
+        <div id="roomCode" class="room-code"></div>
+        <button id="copyCodeBtn" class="ghost">📋 კოდის კოპირება</button>
+        <p class="lobby-status" id="lobbyStatus">⏳ ველოდები მეგობარს…</p>
+      </div>
+      <p id="lobbyErr" class="lobby-err"></p>
+    </div>
   </div>
 
   <!-- პროფილის / რეკორდების პანელი -->
@@ -265,6 +305,7 @@ const AI_PRESET = {
   hard:   { speed: 12.0, follow: 0.22, passive: 0.55, err: 6 },
 };
 const pointerAssign = {}; // pointerId -> რომელ რაკეტს მართავს ეს თითი (multi-touch)
+let online = null;        // ონლაინ სესია: { role, peer, conn, connected, ... } ან null
 
 // დამხმარეები: ვინ არის მოთამაშე/AI cpu რეჟიმში
 function humanPaddle() { return playerSide === 'bottom' ? pBottom : pTop; }
@@ -638,7 +679,7 @@ function saveStats(s)   { localStorage.setItem('stats', JSON.stringify(s)); }
 function recordResult(youWon) {
   const s = getStats();
   s.longestRally = Math.max(s.longestRally || 0, bestRally);
-  if (mode === 'cpu') { // მოგება/სერია მხოლოდ კომპიუტერთან ითვლება
+  if (mode === 'cpu' && !online) { // მოგება/სერია მხოლოდ კომპიუტერთან ითვლება
     s.games = (s.games || 0) + 1;
     if (youWon) { s.wins = (s.wins || 0) + 1; s.streak = (s.streak || 0) + 1; s.bestStreak = Math.max(s.bestStreak || 0, s.streak); }
     else { s.losses = (s.losses || 0) + 1; s.streak = 0; }
@@ -764,6 +805,7 @@ function pointerToField(clientX, clientY) {
 }
 // რომელ რაკეტს ეკუთვნის ეს შეხება
 function pickPaddle(f) {
+  if (online) return online.role === 'host' ? pBottom : pTop; // ონლაინ: შენს რაკეტს მართავ
   if (mode === 'cpu') return humanPaddle();
   return f.y < H / 2 ? pTop : pBottom; // duo: ზედა ნახევარი → ზედა, ქვედა → ქვედა
 }
@@ -820,8 +862,8 @@ function update() {
     if (keys['d'] || keys['D']) pTop.target += 9;
   }
 
-  // AI მხოლოდ cpu რეჟიმში მართავს ერთ რაკეტს
-  if (mode === 'cpu') updateAI(aiPaddle());
+  // AI მხოლოდ cpu რეჟიმში (ონლაინში არა)
+  if (mode === 'cpu' && !online) updateAI(aiPaddle());
 
   // ორივე რაკეტის გლუვი მოძრაობა target-ისკენ
   pBottom.target = Math.max(0, Math.min(W - PADDLE_W, pBottom.target));
@@ -1032,10 +1074,165 @@ function roundRect(x, y, w, h, r) {
   ctx.fill();
 }
 
+// ================= ონლაინ (PeerJS, P2P — backend-ის გარეშე) =================
+// host = ქვედა რაკეტი (ავტორიტეტული ფიზიკა), guest = ზედა რაკეტი
+const lobbyEl = document.getElementById('lobby');
+const lobbyHome = document.getElementById('lobbyHome');
+const lobbyWait = document.getElementById('lobbyWait');
+const lobbyErrEl = document.getElementById('lobbyErr');
+const roomCodeEl = document.getElementById('roomCode');
+const lobbyStatus = document.getElementById('lobbyStatus');
+
+function genCode() {
+  const s = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = ''; for (let i = 0; i < 4; i++) c += s[Math.floor(Math.random() * s.length)];
+  return c;
+}
+function openLobby() {
+  lobbyErrEl.textContent = '';
+  lobbyHome.classList.remove('hidden');
+  lobbyWait.classList.add('hidden');
+  lobbyEl.classList.remove('hidden');
+}
+function closeLobby() { lobbyEl.classList.add('hidden'); }
+function lobbyError(msg) {
+  lobbyErrEl.textContent = '⚠️ ' + msg;
+  lobbyHome.classList.remove('hidden');
+  lobbyWait.classList.add('hidden');
+}
+if (typeof Peer === 'undefined') {
+  document.getElementById('onlineBtn').style.display = 'none'; // PeerJS ვერ ჩაიტვირთა
+}
+document.getElementById('onlineBtn').addEventListener('click', () => { initAudio(); openLobby(); });
+document.getElementById('lobbyClose').addEventListener('click', () => { endOnline(); closeLobby(); });
+
+document.getElementById('createRoomBtn').addEventListener('click', startHost);
+document.getElementById('joinRoomBtn').addEventListener('click', () => {
+  const code = document.getElementById('joinCode').value.trim().toUpperCase();
+  if (code.length >= 3) startJoin(code);
+});
+document.getElementById('copyCodeBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(roomCodeEl.textContent); } catch (e) {}
+});
+
+function startHost() {
+  if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
+  const code = genCode();
+  const peer = new Peer('tenisi-' + code, { debug: 0 });
+  online = { role: 'host', peer, conn: null, connected: false, oppTarget: W/2 - PADDLE_W/2, code };
+  peer.on('open', () => {
+    roomCodeEl.textContent = code;
+    lobbyHome.classList.add('hidden');
+    lobbyWait.classList.remove('hidden');
+    lobbyStatus.textContent = '⏳ ველოდები მეგობარს…';
+  });
+  peer.on('connection', c => {
+    online.conn = c;
+    c.on('open', () => { setupConn(c); beginOnlineGame(); });
+  });
+  peer.on('error', e => { online = null; lobbyError('ვერ შეიქმნა ოთახი (' + e.type + ')'); });
+}
+function startJoin(code) {
+  if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
+  const peer = new Peer(undefined, { debug: 0 });
+  online = { role: 'guest', peer, conn: null, connected: false, lastState: null };
+  lobbyStatus.textContent = '⏳ ვუკავშირდები…';
+  lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
+  roomCodeEl.textContent = code;
+  peer.on('open', () => {
+    const c = peer.connect('tenisi-' + code, { reliable: false });
+    online.conn = c;
+    c.on('open', () => { setupConn(c); beginOnlineGuest(); });
+    setTimeout(() => { if (online && !online.connected) { endOnline(); lobbyError('ოთახი ვერ მოიძებნა'); } }, 9000);
+  });
+  peer.on('error', e => { endOnline(); lobbyError(e.type === 'peer-unavailable' ? 'ასეთი ოთახი არ არსებობს' : 'შეცდომა (' + e.type + ')'); });
+}
+function setupConn(c) {
+  c.on('data', onNetData);
+  c.on('close', onNetClose);
+  c.on('error', () => {});
+}
+function beginOnlineGame() { // host
+  online.connected = true; closeLobby();
+  mode = 'cpu'; // ლეიაუტისთვის (AI გამორთულია online-ის გამო)
+  startGame();
+}
+function beginOnlineGuest() {
+  online.connected = true; closeLobby();
+  mode = 'cpu';
+  overlay.classList.add('hidden');
+  running = false; // პირველ state-მდე
+}
+function onNetData(d) {
+  if (!online) return;
+  if (online.role === 'host') {
+    if (d && d.t === 'i') online.oppTarget = d.x;
+  } else {
+    if (d && d.t === 's') { online.lastState = d; applyState(d); }
+  }
+}
+function applyState(st) { // guest — host-ის ავტორიტეტული მდგომარეობა (pTop ლოკალურია)
+  ball.x = st.b[0]; ball.y = st.b[1];
+  pBottom.x = st.bot;
+  scoreP = st.sp; scoreA = st.sa;
+  rally = st.rl;
+  countdownUntil = st.cd > 0 ? performance.now() + st.cd : 0;
+  const wasRunning = running;
+  running = st.run;
+  if (!st.run && wasRunning && !online.overShown) { online.overShown = true; showOnlineOver(st.sp, st.sa); }
+}
+function showOnlineOver(sp, sa) { // guest = ზედა მხარე
+  const won = sa > sp;
+  overlay.querySelector('h1').textContent = won ? 'შენ მოიგე! 🏆' : 'წააგე';
+  subtitleEl.textContent = `ანგარიში ${sa} : ${sp}`;
+  startBtn.textContent = 'მენიუ';
+  overlay.classList.remove('hidden');
+  setTimeout(endOnline, 400);
+}
+function onNetClose() {
+  if (!online) return;
+  if (!online.overShown && running) {
+    overlay.querySelector('h1').textContent = 'კავშირი გაწყდა';
+    subtitleEl.textContent = 'მეგობარი გავიდა';
+    overlay.classList.remove('hidden');
+  }
+  endOnline();
+}
+function endOnline() {
+  if (!online) return;
+  try { online.conn && online.conn.close(); } catch (e) {}
+  try { online.peer && online.peer.destroy(); } catch (e) {}
+  online = null;
+  running = false;
+}
+function netSendState() {
+  const c = online.conn; if (!c || !c.open) return;
+  const cd = Math.max(0, countdownUntil - performance.now());
+  try { c.send({ t: 's', b: [Math.round(ball.x), Math.round(ball.y)], bot: Math.round(pBottom.x), sp: scoreP, sa: scoreA, cd: Math.round(cd), rl: rally, run: running }); } catch (e) {}
+}
+function netSendInput() {
+  const c = online.conn; if (!c || !c.open) return;
+  try { c.send({ t: 'i', x: Math.round(pTop.target) }); } catch (e) {}
+}
+
 // ---- ციკლი ----
 function loop() {
-  if (running) update();
-  draw();
+  if (online && online.connected) {
+    if (online.role === 'host') {
+      if (running) { if (online.oppTarget != null) pTop.target = online.oppTarget; update(); }
+      netSendState();
+      if (!running && online.overShown !== 'done' && online.endAt && performance.now() > online.endAt) { online.overShown = 'done'; endOnline(); }
+      if (!running && !online.endAt) online.endAt = performance.now() + 1200; // over-ის შემდეგ ცოტა ხანში teardown
+    } else { // guest
+      pTop.target = Math.max(0, Math.min(W - PADDLE_W, pTop.target));
+      pTop.x += (pTop.target - pTop.x) * 0.35;
+      netSendInput();
+    }
+    draw();
+  } else {
+    if (running) update();
+    draw();
+  }
   requestAnimationFrame(loop);
 }
 loop();
