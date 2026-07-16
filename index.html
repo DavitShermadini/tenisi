@@ -987,7 +987,7 @@ function drawCenterNumber(text, fontPx, fill) {
     ctx.restore();
   };
   if (mode === 'duo') { one(H * 0.72, 0); one(H * 0.28, Math.PI); }
-  else one(H / 2, 0);
+  else one(H / 2, fieldRotation === 90 ? -Math.PI/2 : 0); // landscape-ში ვასწორებთ ორიენტაციას
 }
 
 function draw() {
@@ -1036,9 +1036,14 @@ function draw() {
     ctx.save(); ctx.translate(W - 44, 70); ctx.rotate(Math.PI);
     ctx.fillText(scoreA, 0, 0); ctx.restore();        // ზედა მოთამაშე (180°)
   } else {
-    ctx.textAlign = 'left';
-    ctx.fillText(scoreA, 18, H/2 - 24);
-    ctx.fillText(scoreP, 18, H/2 + 56);
+    // landscape-ში ქულებს ვასწორებთ (canvas 90°-ითაა, ამიტომ -90° საპირისპიროდ)
+    const corr = fieldRotation === 90 ? -Math.PI/2 : 0;
+    const drawScore = (text, x, y) => {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(corr);
+      ctx.textAlign = 'left'; ctx.fillText(text, 0, 0); ctx.restore();
+    };
+    drawScore(scoreA, 18, H/2 - 24);
+    drawScore(scoreP, 18, H/2 + 56);
   }
 
   // ბურთის კვალი
