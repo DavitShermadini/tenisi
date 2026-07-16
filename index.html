@@ -68,7 +68,24 @@
     cursor: pointer; transition: background .15s, border-color .15s;
   }
   .seg:active { transform: scale(.96); }
-  .seg.on { background: #fff; color: #000; border-color: #fff; }
+  .seg { color: rgba(255,255,255,0.6); }            /* მოუნიშნავი — მკრთალი */
+  .seg.on {
+    background: #fff; color: #000; border-color: #fff; font-weight: 800;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
+  }
+  .seg.on::after { content: ' ✓'; }                 /* ცხადი ნიშანი რომელია არჩეული */
+  /* ქვედა ნავბარი */
+  #navbar {
+    display: flex; width: 100%; gap: 4px; margin-top: 6px;
+    padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.12);
+  }
+  .nav-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: none; border: none; color: rgba(255,255,255,0.7);
+    font-size: 11px; cursor: pointer; padding: 4px 2px; border-radius: 10px;
+  }
+  .nav-btn .ni { font-size: 20px; }
+  .nav-btn:active { transform: scale(.94); background: rgba(255,255,255,0.08); }
   .rec { color: rgba(255,255,255,0.55); font-size: 13px; margin-top: 2px; }
   .rec:empty { display: none; }
   .skin-seg[data-skin="neon"]   { border-color: #39f6ff; }
@@ -174,30 +191,28 @@
     #overlay button { margin-top: 2px; padding: 8px 22px; font-size: 15px; }
     #overlay button.ghost { padding: 6px 16px; font-size: 12.5px; }
     #grid { font-size: 16px; letter-spacing: 2px; line-height: 1.15; max-width: 80vw; }
-    #musicBtn, #soundBtn { top: 8px; padding: 5px 10px; font-size: 12px; }
-    #musicBtn { left: 8px; } #soundBtn { right: 8px; }
     .seg { padding: 6px 12px; font-size: 12.5px; }
     .seg-label { font-size: 12px; }
     .rec { font-size: 11px; }
+    #navbar { padding-top: 6px; margin-top: 3px; }
+    .nav-btn { font-size: 10px; } .nav-btn .ni { font-size: 17px; }
   }
 </style>
 </head>
 <body>
 <div id="wrap">
   <canvas id="game"></canvas>
-  <button id="musicBtn" title="ფონური მუსიკა">🎵</button>
-  <button id="soundBtn" title="ხმის გადართვა">🔊 რეტრო</button>
   <div id="overlay">
     <h1>ტ ე ნ ი ს ი</h1>
     <p id="subtitle"></p>
     <div id="modeRow" class="seg-row">
-      <button class="seg" data-mode="cpu">🤖 კომპიუტერთან</button>
+      <button class="seg" data-mode="cpu">🤖 AI</button>
       <button class="seg" data-mode="duo">✋🤚 ორი ხელით</button>
     </div>
     <div id="sideRow" class="seg-row">
-      <span class="seg-label">შენი მხარე:</span>
-      <button class="seg" data-side="bottom">⬇️ ქვედა</button>
-      <button class="seg" data-side="top">⬆️ ზედა</button>
+      <span class="seg-label">მხარე:</span>
+      <button class="seg" data-side="top">ზედა-მარჯვ.</button>
+      <button class="seg" data-side="bottom">ქვედა-მარცხ.</button>
     </div>
     <div id="diffRow" class="seg-row">
       <span class="seg-label">სირთულე:</span>
@@ -205,21 +220,45 @@
       <button class="seg" data-diff="medium">საშუალო</button>
       <button class="seg" data-diff="hard">ძნელი</button>
     </div>
-    <div id="skinRow" class="seg-row">
-      <span class="seg-label">სტილი:</span>
-      <button class="seg skin-seg" data-skin="classic">კლასიკური</button>
-      <button class="seg skin-seg" data-skin="neon">ნეონი</button>
-      <button class="seg skin-seg" data-skin="gold">ოქრო</button>
-      <button class="seg skin-seg" data-skin="matrix">მატრიცა</button>
-    </div>
     <div id="grid"></div>
     <button id="startBtn">დაწყება</button>
-    <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+    <button id="shareBtn" class="ghost hidden">📤 გაზიარება</button>
     <button id="leaveBtn" class="ghost hidden">🚪 გასვლა</button>
-    <button id="onlineBtn" class="ghost">🌐 მეგობართან ონლაინ (beta)</button>
-    <button id="lbBtn" class="ghost">🏆 გლობალური რეიტინგები</button>
-    <button id="profileBtn" class="ghost">👤 პროფილი & რეკორდები</button>
     <p id="recLine" class="rec"></p>
+    <nav id="navbar">
+      <button class="nav-btn" id="onlineBtn"><span class="ni">🌐</span>ონლაინ</button>
+      <button class="nav-btn" id="lbBtn"><span class="ni">🏆</span>რეიტინგი</button>
+      <button class="nav-btn" id="profileBtn"><span class="ni">👤</span>პროფილი</button>
+      <button class="nav-btn" id="settingsBtn"><span class="ni">⚙️</span>პარამეტრები</button>
+    </nav>
+  </div>
+
+  <!-- პარამეტრები -->
+  <div id="settings" class="panel hidden">
+    <div class="panel-card">
+      <button id="settingsClose" class="x">✕</button>
+      <h2 class="panel-title">⚙️ პარამეტრები</h2>
+      <div id="skinRow" class="seg-row">
+        <span class="seg-label">სტილი:</span>
+        <button class="seg skin-seg" data-skin="classic">კლასიკური</button>
+        <button class="seg skin-seg" data-skin="neon">ნეონი</button>
+        <button class="seg skin-seg" data-skin="gold">ოქრო</button>
+        <button class="seg skin-seg" data-skin="matrix">მატრიცა</button>
+      </div>
+      <div class="seg-row">
+        <span class="seg-label">ხმა:</span>
+        <button class="seg" data-snd="retro">რეტრო</button>
+        <button class="seg" data-snd="classic">კლასიკური</button>
+      </div>
+      <div class="seg-row">
+        <span class="seg-label">მუსიკა:</span>
+        <button class="seg" id="musToggle"></button>
+      </div>
+      <div class="seg-row">
+        <span class="seg-label">ვიბრაცია:</span>
+        <button class="seg" id="hapToggle"></button>
+      </div>
+    </div>
   </div>
 
   <!-- გლობალური ლიდერბორდი -->
@@ -910,31 +949,30 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); tryInstantRestart(); }
 });
 
-// ---- ხმის გადამრთველი ----
-const soundBtn = document.getElementById('soundBtn');
-function updateSoundBtn() {
-  soundBtn.textContent = soundMode === 'retro' ? '🔊 რეტრო' : '🏓 კლასიკური';
-}
-updateSoundBtn();
-soundBtn.addEventListener('click', () => {
-  initAudio();
-  soundMode = soundMode === 'retro' ? 'classic' : 'retro';
-  localStorage.setItem('soundMode', soundMode);
-  updateSoundBtn();
-  sfx.paddle(); // ნიმუში — რომ მაშინვე მოისმინო
-});
+// ---- პარამეტრები: ხმა / მუსიკა / ვიბრაცია ----
+const settingsPanel = document.getElementById('settings');
+const musToggle = document.getElementById('musToggle');
+const hapToggle = document.getElementById('hapToggle');
+function updateSoundSeg() { document.querySelectorAll('[data-snd]').forEach(b => b.classList.toggle('on', b.dataset.snd === soundMode)); }
+function updateMus() { musToggle.textContent = musicOn ? '🎵 ჩართული' : '🔇 გამორთული'; musToggle.classList.toggle('on', musicOn); }
+function updateHap() { hapToggle.textContent = hapticsOn ? 'ჩართული' : 'გამორთული'; hapToggle.classList.toggle('on', hapticsOn); }
 
-// ---- ფონური მუსიკის გადამრთველი ----
-const musicBtn = document.getElementById('musicBtn');
-function updateMusicBtn() { musicBtn.textContent = musicOn ? '🎵' : '🔇'; }
-updateMusicBtn();
-musicBtn.addEventListener('click', () => {
-  initAudio();
-  musicOn = !musicOn;
-  localStorage.setItem('musicOn', musicOn ? 'on' : 'off');
-  updateMusicBtn();
-  if (musicOn && !running) startMusic(); else stopMusic();
+document.querySelectorAll('[data-snd]').forEach(b => b.addEventListener('click', () => {
+  initAudio(); soundMode = b.dataset.snd; localStorage.setItem('soundMode', soundMode); updateSoundSeg(); sfx.paddle();
+}));
+musToggle.addEventListener('click', () => {
+  initAudio(); musicOn = !musicOn; localStorage.setItem('musicOn', musicOn ? 'on' : 'off');
+  updateMus(); if (musicOn && !running) startMusic(); else stopMusic();
 });
+hapToggle.addEventListener('click', () => {
+  hapticsOn = !hapticsOn; localStorage.setItem('haptics', hapticsOn ? 'on' : 'off'); updateHap(); vibrate(25);
+});
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  initAudio(); updateMenuUI(false); updateSoundSeg(); updateMus(); updateHap();
+  settingsPanel.classList.remove('hidden');
+});
+document.getElementById('settingsClose').addEventListener('click', () => settingsPanel.classList.add('hidden'));
+updateSoundSeg(); updateMus(); updateHap();
 
 // პირველ ჟესტზე ვრთავთ აუდიოს და, თუ მენიუზე ვართ — ფონურ მუსიკას
 function ensureMenuMusic(e) {
@@ -1192,15 +1230,15 @@ function draw() {
     ctx.save(); ctx.translate(W - 44, 70); ctx.rotate(Math.PI);
     ctx.fillText(scoreA, 0, 0); ctx.restore();        // ზედა მოთამაშე (180°)
   } else {
-    // landscape-ში ქულებს ვასწორებთ (canvas 90°-ითაა, ამიტომ -90° საპირისპიროდ)
+    // ცენტრში, კიდიდან მოშორებით — ორივე ორიენტაციაში ჩანს (canvas 90°-ს ვასწორებთ)
     const corr = fieldRotation === 90 ? -Math.PI/2 : 0;
-    const drawScore = (text, x, y) => {
-      ctx.save(); ctx.translate(x, y); ctx.rotate(corr);
-      ctx.textAlign = 'left'; ctx.fillText(text, 0, 0); ctx.restore();
+    const drawScore = (text, yc) => {
+      ctx.save(); ctx.translate(W/2, yc); ctx.rotate(corr);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, 0, 0); ctx.restore();
     };
-    // guest-ისთვის „შენი" ქულა (scoreA) ქვემოთ, მოწინააღმდეგისა ზემოთ
-    drawScore(guestView ? scoreP : scoreA, 18, H/2 - 24);
-    drawScore(guestView ? scoreA : scoreP, 18, H/2 + 56);
+    drawScore(guestView ? scoreP : scoreA, H * 0.30); // მოწინააღმდეგე
+    drawScore(guestView ? scoreA : scoreP, H * 0.70); // შენ
   }
 
   // ბურთის კვალი (guest-ისთვის Y შებრუნებული)
