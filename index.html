@@ -1249,6 +1249,9 @@ function draw() {
   ctx.fillStyle = '#000';
   ctx.fillRect(-20, -20, W + 40, H + 40);
 
+  // მენიუზე/თამაშის დასრულებისას — სუფთა შავი ფონი (მაგიდა არ ჩანს, თვალს არ აჭრელებს)
+  if (!running) { ctx.restore(); return; }
+
   // rally-ს მიხედვით მოედანი "თბება"
   const glow = Math.min(rally / 24, 1);
   if (glow > 0.01) {
@@ -1288,15 +1291,15 @@ function draw() {
     ctx.save(); ctx.translate(W - 44, 70); ctx.rotate(Math.PI);
     ctx.fillText(scoreA, 0, 0); ctx.restore();        // ზედა მოთამაშე (180°)
   } else {
-    // ცენტრში, კიდიდან მოშორებით — ორივე ორიენტაციაში ჩანს (canvas 90°-ს ვასწორებთ)
+    // ზედა-მარცხენა კიდესთან (როგორც თავიდან), ოღონდ კიდიდან ჩამოწეული რომ სრულად ჩანდეს
     const corr = fieldRotation === 90 ? -Math.PI/2 : 0;
-    const drawScore = (text, yc) => {
-      ctx.save(); ctx.translate(W/2, yc); ctx.rotate(corr);
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const drawScore = (text, x, y) => {
+      ctx.save(); ctx.translate(x, y); ctx.rotate(corr);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
       ctx.fillText(text, 0, 0); ctx.restore();
     };
-    drawScore(guestView ? scoreP : scoreA, H * 0.30); // მოწინააღმდეგე
-    drawScore(guestView ? scoreA : scoreP, H * 0.70); // შენ
+    drawScore(guestView ? scoreP : scoreA, 80, H/2 - 24); // მოწინააღმდეგე (ზემოთ)
+    drawScore(guestView ? scoreA : scoreP, 80, H/2 + 56); // შენ
   }
 
   // ბურთის კვალი (guest-ისთვის Y შებრუნებული)
