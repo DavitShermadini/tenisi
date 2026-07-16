@@ -41,6 +41,7 @@
   }
   #overlay h1 { font-size: 23px; font-weight: 600; letter-spacing: .5px; }
   #overlay p  { font-size: 13px; opacity: .65; max-width: 290px; line-height: 1.45; }
+  #subtitle:empty { display: none; }
   #overlay > button {
     margin-top: 2px; padding: 8px 22px; font-size: 14px;
     background: rgba(255,255,255,0.14); color: #fff;
@@ -377,7 +378,7 @@ const PADDLE_W = W / 5;      // რაკეტის სიგრძე ≈ ე
 const PADDLE_H = 14;
 const PADDLE_MARGIN = 40;    // მანძილი კიდიდან
 const BALL = 16;             // კვადრატის გვერდი
-const WIN_SCORE = 7;
+const WIN_SCORE = 11;
 
 const pBottom = { x: W/2 - PADDLE_W/2, y: H - PADDLE_MARGIN, target: W/2 - PADDLE_W/2 }; // ქვედა რაკეტი
 const pTop    = { x: W/2 - PADDLE_W/2, y: PADDLE_MARGIN,     target: W/2 - PADDLE_W/2 }; // ზედა რაკეტი
@@ -792,11 +793,7 @@ const sideRow = document.getElementById('sideRow');
 const subtitleEl = document.getElementById('subtitle');
 const recLineEl = document.getElementById('recLine');
 
-function subtitleText() {
-  return mode === 'cpu'
-    ? 'გადაატარე თითი, რომ შენი რაკეტი ამოძრავო. 7 ქულა იმარჯვებს.'
-    : 'ორი ხელით ითამაშე: ქვედა ნახევარი — ქვედა რაკეტი, ზედა ნახევარი — ზედა. 7 ქულა.';
-}
+function subtitleText() { return ''; } // ინსტრუქცია მოხსნილია
 function updateRecLine() {
   const r = +(localStorage.getItem('bestRallyEver') || 0);
   recLineEl.textContent = r > 0 ? `🔥 შენი რეკორდ-გაცვლა: ${r}` : '';
