@@ -1391,8 +1391,20 @@ document.getElementById('copyCodeBtn').addEventListener('click', async () => {
   } catch (e) {}
 });
 
+// Wake Lock — ეკრანი არ ჩაქრეს ონლაინის დროს (მობილურზე კავშირი არ გაწყდეს)
+let wakeLock = null;
+async function acquireWake() { try { if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
+function releaseWake() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && online) {
+    acquireWake();
+    try { if (online.peer && online.peer.disconnected) online.peer.reconnect(); } catch (e) {}
+  }
+});
+
 function startHost() {
   if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
+  acquireWake();
   const code = genCode();
   const peer = newPeer('tenisi-' + code);
   online = { role: 'host', peer, conn: null, connected: false, oppTarget: W/2 - PADDLE_W/2, code };
@@ -1400,28 +1412,45 @@ function startHost() {
     roomCodeEl.textContent = code;
     lobbyHome.classList.add('hidden');
     lobbyWait.classList.remove('hidden');
-    lobbyStatus.textContent = '⏳ ველოდები მეგობარს…';
+    lobbyStatus.textContent = '⏳ ველოდები მეგობარს… (ეკრანი ჩართული დატოვე)';
   });
   peer.on('connection', c => {
     online.conn = c;
     c.on('open', () => { setupConn(c); beginOnlineGame(); });
   });
-  peer.on('error', e => { online = null; lobbyError('ვერ შეიქმნა ოთახი (' + e.type + ')'); });
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} }); // broker-თან კავშირი აღვადგინოთ
+  peer.on('error', e => { releaseWake(); online = null; lobbyError('ვერ შეიქმნა ოთახი (' + e.type + ')'); });
 }
 function startJoin(code) {
   if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
+  acquireWake();
   const peer = newPeer(undefined);
   online = { role: 'guest', peer, conn: null, connected: false, snap: null };
-  lobbyStatus.textContent = '⏳ ვუკავშირდები…';
   lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
   roomCodeEl.textContent = code;
-  peer.on('open', () => {
+  lobbyStatus.textContent = '⏳ ვუკავშირდები…';
+  let attempts = 0, done = false;
+  function fail(msg) { if (done) return; done = true; endOnline(); lobbyError(msg); }
+  function attempt() {
+    if (done || !online || online.connected) return;
+    attempts++;
+    lobbyStatus.textContent = attempts > 1 ? `⏳ ვცდი ხელახლა… (${attempts})` : '⏳ ვუკავშირდები…';
     const c = peer.connect('tenisi-' + code, { reliable: false });
     online.conn = c;
-    c.on('open', () => { setupConn(c); beginOnlineGuest(); });
-    setTimeout(() => { if (online && !online.connected) { endOnline(); lobbyError('ოთახი ვერ მოიძებნა'); } }, 9000);
+    c.on('open', () => { if (done) return; setupConn(c); beginOnlineGuest(); });
+    c.on('error', () => {});
+  }
+  peer.on('open', attempt);
+  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
+  peer.on('error', e => {
+    if (done || !online || online.connected) return;
+    // host ჯერ არ ჩანს (შესაძლოა reconnect-შია) — ვცადოთ ხელახლა რამდენჯერმე
+    if (attempts < 6) setTimeout(attempt, 1600);
+    else fail(e.type === 'peer-unavailable'
+      ? 'ოთახი ვერ მოიძებნა — მასპინძელი აქტიური უნდა იყოს (ეკრანი ჩართული, აპი გახსნილი)'
+      : 'კავშირის შეცდომა (' + e.type + ')');
   });
-  peer.on('error', e => { endOnline(); lobbyError(e.type === 'peer-unavailable' ? 'ასეთი ოთახი არ არსებობს' : 'შეცდომა (' + e.type + ')'); });
+  setTimeout(() => fail('ოთახი ვერ მოიძებნა — მასპინძელი დარწმუნდი აქტიურია'), 22000); // საბოლოო ლიმიტი
 }
 function setupConn(c) {
   c.on('data', onNetData);
@@ -1496,6 +1525,7 @@ function endOnline() {
   try { online.peer && online.peer.destroy(); } catch (e) {}
   online = null;
   running = false;
+  releaseWake();
 }
 function netSendState() {
   const c = online.conn; if (!c || !c.open) return;
