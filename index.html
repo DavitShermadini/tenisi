@@ -73,6 +73,47 @@
   .skin-seg[data-skin="neon"]   { border-color: #39f6ff; }
   .skin-seg[data-skin="gold"]   { border-color: #ffd54a; }
   .skin-seg[data-skin="matrix"] { border-color: #7dff5a; }
+
+  /* პროფილის პანელი */
+  .panel {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.75); padding: 16px;
+  }
+  .panel-card {
+    position: relative; width: 100%; max-width: 340px;
+    background: #111; border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 18px; padding: 24px 20px;
+    display: flex; flex-direction: column; align-items: center; gap: 14px;
+    max-height: 92vh; overflow-y: auto;
+  }
+  .panel-card .x {
+    position: absolute; top: 10px; right: 12px;
+    background: none; border: none; color: rgba(255,255,255,0.6);
+    font-size: 18px; cursor: pointer; padding: 4px;
+  }
+  .avatar-wrap { position: relative; width: 96px; height: 96px; }
+  #avatarImg {
+    width: 96px; height: 96px; border-radius: 50%;
+    object-fit: cover; background: #222;
+    border: 2px solid rgba(255,255,255,0.25);
+  }
+  #avatarBtn {
+    position: absolute; bottom: -2px; right: -2px;
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #fff; color: #000; border: none; cursor: pointer; font-size: 14px;
+  }
+  #nameInput {
+    width: 100%; text-align: center; font-size: 17px; font-weight: 600;
+    background: rgba(255,255,255,0.08); color: #fff;
+    border: 1px solid rgba(255,255,255,0.2); border-radius: 12px; padding: 10px;
+  }
+  #nameInput:focus { outline: none; border-color: rgba(255,255,255,0.5); }
+  .stats { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: rgba(255,255,255,0.06); border-radius: 12px; padding: 10px; text-align: center; }
+  .stat b { display: block; font-size: 22px; color: #fff; }
+  .stat span { font-size: 11px; color: rgba(255,255,255,0.55); }
+  .panel-card .hint { font-size: 11px; color: rgba(255,255,255,0.45); text-align: center; line-height: 1.4; }
   #soundBtn {
     position: absolute; top: 14px; right: 14px; z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -140,7 +181,23 @@
     <div id="grid"></div>
     <button id="startBtn">დაწყება</button>
     <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+    <button id="profileBtn" class="ghost">👤 პროფილი & რეკორდები</button>
     <p id="recLine" class="rec"></p>
+  </div>
+
+  <!-- პროფილის / რეკორდების პანელი -->
+  <div id="profile" class="panel hidden">
+    <div class="panel-card">
+      <button id="profileClose" class="x">✕</button>
+      <div class="avatar-wrap">
+        <img id="avatarImg" alt="avatar">
+        <button id="avatarBtn" title="ფოტოს დაყენება">📷</button>
+        <input id="avatarFile" type="file" accept="image/*" hidden>
+      </div>
+      <input id="nameInput" maxlength="20" placeholder="შენი სახელი">
+      <div id="statsBox" class="stats"></div>
+      <p class="hint">🔒 პროფილი ლოკალურად ინახება. Google-ით შესვლა და გლობალური რეიტინგები მალე დაემატება.</p>
+    </div>
   </div>
 </div>
 
@@ -498,6 +555,7 @@ function endGame(msg) {
   // პირადი რეკორდი — ყველაზე გრძელი გაცვლა (ლოკალურად)
   const rec = Math.max(bestRally, +(localStorage.getItem('bestRallyEver') || 0));
   localStorage.setItem('bestRallyEver', rec);
+  recordResult(won); // სტატისტიკა (თამაშები, მოგება, სერია)
 
   overlay.querySelector('h1').textContent = msg;
   overlay.querySelector('#subtitle').textContent =
@@ -570,6 +628,70 @@ skinRow.addEventListener('click', e => {
 updateMenuUI(true);
 updateRecLine();
 
+// ---- პროფილი & რეკორდები (ლოკალური) ----
+function getProfile() { try { return JSON.parse(localStorage.getItem('profile')) || {}; } catch (e) { return {}; } }
+function getStats()   { try { return JSON.parse(localStorage.getItem('stats'))   || {}; } catch (e) { return {}; } }
+function saveProfile(p) { localStorage.setItem('profile', JSON.stringify(p)); }
+function saveStats(s)   { localStorage.setItem('stats', JSON.stringify(s)); }
+
+// endGame-იდან: სტატისტიკის განახლება
+function recordResult(youWon) {
+  const s = getStats();
+  s.longestRally = Math.max(s.longestRally || 0, bestRally);
+  if (mode === 'cpu') { // მოგება/სერია მხოლოდ კომპიუტერთან ითვლება
+    s.games = (s.games || 0) + 1;
+    if (youWon) { s.wins = (s.wins || 0) + 1; s.streak = (s.streak || 0) + 1; s.bestStreak = Math.max(s.bestStreak || 0, s.streak); }
+    else { s.losses = (s.losses || 0) + 1; s.streak = 0; }
+  }
+  saveStats(s);
+}
+
+const profileEl = document.getElementById('profile');
+const avatarImg = document.getElementById('avatarImg');
+const avatarFile = document.getElementById('avatarFile');
+const nameInput = document.getElementById('nameInput');
+const statsBox = document.getElementById('statsBox');
+const DEFAULT_AVATAR = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96"><rect width="96" height="96" fill="#222"/><circle cx="48" cy="40" r="17" fill="#555"/><rect x="20" y="62" width="56" height="34" rx="17" fill="#555"/></svg>');
+
+function renderProfile() {
+  const p = getProfile();
+  avatarImg.src = p.avatar || DEFAULT_AVATAR;
+  nameInput.value = p.name || '';
+  const s = getStats();
+  const games = s.games || 0, wins = s.wins || 0, wr = games ? Math.round(wins / games * 100) : 0;
+  const cells = [
+    [games, 'თამაში'], [wins, 'მოგება'], [wr + '%', 'მოგების %'],
+    [s.longestRally || 0, 'რეკ. გაცვლა'], [s.streak || 0, 'სერია'], [s.bestStreak || 0, 'საუკ. სერია'],
+  ];
+  statsBox.innerHTML = cells.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
+}
+function saveName() { const p = getProfile(); p.name = nameInput.value.trim(); saveProfile(p); }
+
+document.getElementById('profileBtn').addEventListener('click', () => { renderProfile(); profileEl.classList.remove('hidden'); });
+document.getElementById('profileClose').addEventListener('click', () => { saveName(); profileEl.classList.add('hidden'); });
+nameInput.addEventListener('change', saveName);
+document.getElementById('avatarBtn').addEventListener('click', () => avatarFile.click());
+avatarFile.addEventListener('change', e => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      // 256px-მდე ცენტრში ჩამოჭრა/შემცირება, რომ localStorage-ში ჩაეტიოს
+      const size = 256, c = document.createElement('canvas'); c.width = c.height = size;
+      const cx = c.getContext('2d');
+      const s = Math.min(img.width, img.height);
+      cx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+      const data = c.toDataURL('image/jpeg', 0.85);
+      const p = getProfile(); p.avatar = data; saveProfile(p);
+      avatarImg.src = data;
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(f);
+});
+
 // ---- შედეგის გაზიარება ----
 shareBtn.addEventListener('click', async () => {
   if (!lastResult) return;
@@ -589,6 +711,8 @@ function tryInstantRestart() {
   if (!running && !overlay.classList.contains('hidden')) startGame();
 }
 window.addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') return;              // სახელის ველში ვწერთ
+  if (!document.getElementById('profile').classList.contains('hidden')) return; // პროფილი ღიაა
   if (e.code === 'Space' || e.key === 'Enter') { e.preventDefault(); tryInstantRestart(); }
 });
 
