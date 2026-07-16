@@ -12,9 +12,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="ტენისი">
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<style>
+<meta name="apple-mobile-web-app-title" content="ტენისი"><style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     height: 100%;
@@ -1349,7 +1347,6 @@ const ICE = { iceServers: [
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
 ] };
-function newPeer(id) { return new Peer(id, { debug: 0, config: ICE }); }
 function inviteLink(code) { return location.origin + location.pathname + '?room=' + code; }
 
 function genCode() {
@@ -1369,8 +1366,8 @@ function lobbyError(msg) {
   lobbyHome.classList.remove('hidden');
   lobbyWait.classList.add('hidden');
 }
-if (typeof Peer === 'undefined') {
-  document.getElementById('onlineBtn').style.display = 'none'; // PeerJS ვერ ჩაიტვირთა
+if (!window.RTCPeerConnection) {
+  document.getElementById('onlineBtn').style.display = 'none'; // ბრაუზერს WebRTC არ აქვს
 }
 document.getElementById('onlineBtn').addEventListener('click', () => { initAudio(); openLobby(); });
 document.getElementById('lobbyClose').addEventListener('click', () => { endOnline(); closeLobby(); });
@@ -1396,66 +1393,70 @@ let wakeLock = null;
 async function acquireWake() { try { if (navigator.wakeLock && !wakeLock) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {} }
 function releaseWake() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && online) {
-    acquireWake();
-    try { if (online.peer && online.peer.disconnected) online.peer.reconnect(); } catch (e) {}
-  }
+  if (document.visibilityState === 'visible' && online) acquireWake();
 });
 
-function startHost() {
-  if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
+// WebRTC კონფიგი (STUN + TURN — იგივე ICE)
+const rtcConfig = { iceServers: ICE.iceServers };
+function fbReady() { return !!(window.FB && window.FB.room); }
+
+// RTCDataChannel-ს PeerJS-ის მსგავს ინტერფეისში ვახვევთ (netcode უცვლელი რჩება)
+function wireChannel(ch) {
+  online.channel = ch;
+  online.conn = {
+    get open() { return ch.readyState === 'open'; },
+    send(o) { try { if (ch.readyState === 'open') ch.send(JSON.stringify(o)); } catch (e) {} },
+    close() { try { ch.close(); } catch (e) {} },
+  };
+  ch.onmessage = e => { let d; try { d = JSON.parse(e.data); } catch (_) { return; } onNetData(d); };
+  ch.onclose = () => onNetClose();
+}
+
+async function startHost() {
+  if (!fbReady()) return lobbyError('ონლაინი ჯერ არ ჩაიტვირთა — სცადე წამში');
   acquireWake();
   const code = genCode();
-  const peer = newPeer('tenisi-' + code);
-  online = { role: 'host', peer, conn: null, connected: false, oppTarget: W/2 - PADDLE_W/2, code };
-  peer.on('open', () => {
-    roomCodeEl.textContent = code;
-    lobbyHome.classList.add('hidden');
-    lobbyWait.classList.remove('hidden');
-    lobbyStatus.textContent = '⏳ ველოდები მეგობარს… (ეკრანი ჩართული დატოვე)';
-  });
-  peer.on('connection', c => {
-    online.conn = c;
-    c.on('open', () => { setupConn(c); beginOnlineGame(); });
-  });
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} }); // broker-თან კავშირი აღვადგინოთ
-  peer.on('error', e => { releaseWake(); online = null; lobbyError('ვერ შეიქმნა ოთახი (' + e.type + ')'); });
-}
-function startJoin(code) {
-  if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
-  acquireWake();
-  const peer = newPeer(undefined);
-  online = { role: 'guest', peer, conn: null, connected: false, snap: null };
-  lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
+  const pc = new RTCPeerConnection(rtcConfig);
+  online = { role: 'host', pc, code, connected: false, oppTarget: W/2 - PADDLE_W/2, unsubs: [] };
+  const ch = pc.createDataChannel('game'); // reliable ordered — კონტროლ-შეტყობინებები არ დაიკარგოს
+  ch.onopen = () => beginOnlineGame();
+  wireChannel(ch);
+  pc.onicecandidate = e => { if (e.candidate) window.FB.room.cand(code, 'caller', e.candidate.toJSON()); };
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await window.FB.room.create(code, { type: offer.type, sdp: offer.sdp });
+  } catch (e) { endOnline(); return lobbyError('ვერ შეიქმნა ოთახი — შეამოწმე Firestore rules'); }
+  if (!online) return;
   roomCodeEl.textContent = code;
-  lobbyStatus.textContent = '⏳ ვუკავშირდები…';
-  let attempts = 0, done = false;
-  function fail(msg) { if (done) return; done = true; endOnline(); lobbyError(msg); }
-  function attempt() {
-    if (done || !online || online.connected) return;
-    attempts++;
-    lobbyStatus.textContent = attempts > 1 ? `⏳ ვცდი ხელახლა… (${attempts})` : '⏳ ვუკავშირდები…';
-    const c = peer.connect('tenisi-' + code, { reliable: false });
-    online.conn = c;
-    c.on('open', () => { if (done) return; setupConn(c); beginOnlineGuest(); });
-    c.on('error', () => {});
-  }
-  peer.on('open', attempt);
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch (e) {} });
-  peer.on('error', e => {
-    if (done || !online || online.connected) return;
-    // host ჯერ არ ჩანს (შესაძლოა reconnect-შია) — ვცადოთ ხელახლა რამდენჯერმე
-    if (attempts < 6) setTimeout(attempt, 1600);
-    else fail(e.type === 'peer-unavailable'
-      ? 'ოთახი ვერ მოიძებნა — მასპინძელი აქტიური უნდა იყოს (ეკრანი ჩართული, აპი გახსნილი)'
-      : 'კავშირის შეცდომა (' + e.type + ')');
-  });
-  setTimeout(() => fail('ოთახი ვერ მოიძებნა — მასპინძელი დარწმუნდი აქტიურია'), 22000); // საბოლოო ლიმიტი
+  lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
+  lobbyStatus.textContent = '⏳ ველოდები მეგობარს…';
+  online.unsubs.push(window.FB.room.onDoc(code, d => {
+    if (d && d.answer && pc.signalingState === 'have-local-offer') pc.setRemoteDescription(new RTCSessionDescription(d.answer)).catch(() => {});
+  }));
+  online.unsubs.push(window.FB.room.onCands(code, 'callee', c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})));
 }
-function setupConn(c) {
-  c.on('data', onNetData);
-  c.on('close', onNetClose);
-  c.on('error', () => {});
+
+async function startJoin(code) {
+  if (!fbReady()) return lobbyError('ონლაინი ჯერ არ ჩაიტვირთა — სცადე წამში');
+  acquireWake();
+  lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
+  roomCodeEl.textContent = code; lobbyStatus.textContent = '⏳ ვუკავშირდები…';
+  let room; try { room = await window.FB.room.get(code); } catch (e) { return lobbyError('შეცდომა — შეამოწმე Firestore rules'); }
+  if (!room || !room.offer) return lobbyError('ოთახი ვერ მოიძებნა — შეამოწმე კოდი');
+  const pc = new RTCPeerConnection(rtcConfig);
+  online = { role: 'guest', pc, code, connected: false, snap: null, unsubs: [] };
+  pc.ondatachannel = e => { const ch = e.channel; ch.onopen = () => beginOnlineGuest(); wireChannel(ch); };
+  pc.onicecandidate = e => { if (e.candidate) window.FB.room.cand(code, 'callee', e.candidate.toJSON()); };
+  try {
+    await pc.setRemoteDescription(new RTCSessionDescription(room.offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await window.FB.room.answer(code, { type: answer.type, sdp: answer.sdp });
+  } catch (e) { endOnline(); return lobbyError('კავშირის შეცდომა'); }
+  if (!online) return;
+  online.unsubs.push(window.FB.room.onCands(code, 'caller', c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {})));
+  setTimeout(() => { if (online && online.role === 'guest' && !online.connected) { endOnline(); lobbyError('კავშირი ვერ დამყარდა — სცადეთ ერთსა და იმავე Wi-Fi-ზე'); } }, 20000);
 }
 function beginOnlineGame() { // host
   online.connected = true; online.overShown = false; closeLobby();
@@ -1521,9 +1522,11 @@ function opponentLeft() {
 function onNetClose() { if (online) opponentLeft(); }
 function endOnline() {
   if (!online) return;
-  try { online.conn && online.conn.close(); } catch (e) {}
-  try { online.peer && online.peer.destroy(); } catch (e) {}
-  online = null;
+  const o = online; online = null;
+  try { o.unsubs && o.unsubs.forEach(u => u && u()); } catch (e) {}
+  try { o.channel && o.channel.close(); } catch (e) {}
+  try { o.pc && o.pc.close(); } catch (e) {}
+  if (o.role === 'host' && o.code && window.FB && window.FB.room) window.FB.room.destroy(o.code); // ოთახის დოკუმენტი ავშალოთ
   running = false;
   releaseWake();
 }
@@ -1545,15 +1548,17 @@ function netSendInput() {
   try { c.send({ t: 'i', x: Math.round(pTop.target) }); } catch (e) {}
 }
 
-// მოსაწვევი ბმულით ავტო-შეერთება (?room=CODE)
+// მოსაწვევი ბმულით ავტო-შეერთება (?room=CODE) — FB-ს დაველოდოთ
 (function autoJoin() {
   const rp = (new URLSearchParams(location.search).get('room') || '').trim().toUpperCase();
-  if (rp && typeof Peer !== 'undefined') {
+  if (!rp) return;
+  const go = () => {
     openLobby();
     document.getElementById('joinCode').value = rp;
     startJoin(rp);
-    history.replaceState(null, '', location.pathname); // URL გავასუფთაოთ
-  }
+    history.replaceState(null, '', location.pathname);
+  };
+  if (fbReady()) go(); else window.addEventListener('fb-ready', go, { once: true });
 })();
 
 // ---- ციკლი ----
@@ -1596,7 +1601,7 @@ if ('serviceWorker' in navigator) {
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, collection, addDoc, onSnapshot, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhSleq4Qgw3acBkvyzv2zjHWM35DwthC4",
@@ -1623,8 +1628,19 @@ try {
     async saveProfile(data) { if (!auth.currentUser) return; await setDoc(doc(db, 'users', auth.currentUser.uid), data, { merge: true }); },
     async loadProfile() { if (!auth.currentUser) return null; const s = await getDoc(doc(db, 'users', auth.currentUser.uid)); return s.exists() ? s.data() : null; },
     async top(field, n) { const snap = await getDocs(query(collection(db, 'users'), orderBy(field, 'desc'), limit(n || 20))); return snap.docs.map(d => d.data()); },
+    // ---- ონლაინ signaling (WebRTC handshake Firestore-ით) ----
+    room: {
+      async create(code, offer) { await setDoc(doc(db, 'rooms', code), { offer, ts: Date.now() }); },
+      async get(code) { const s = await getDoc(doc(db, 'rooms', code)); return s.exists() ? s.data() : null; },
+      async answer(code, answer) { await updateDoc(doc(db, 'rooms', code), { answer }); },
+      async cand(code, side, c) { try { await addDoc(collection(doc(db, 'rooms', code), side), c); } catch (e) {} },
+      onDoc(code, cb) { return onSnapshot(doc(db, 'rooms', code), s => cb(s.exists() ? s.data() : null)); },
+      onCands(code, side, cb) { return onSnapshot(collection(doc(db, 'rooms', code), side), s => s.docChanges().forEach(ch => { if (ch.type === 'added') cb(ch.doc.data()); })); },
+      async destroy(code) { try { await deleteDoc(doc(db, 'rooms', code)); } catch (e) {} },
+    },
   };
   getRedirectResult(auth).catch(() => {});
+  window.dispatchEvent(new CustomEvent('fb-ready'));
   onAuthStateChanged(auth, u => {
     window.FB.user = u ? { uid: u.uid, name: u.displayName, photo: u.photoURL, email: u.email } : null;
     window.dispatchEvent(new CustomEvent('fb-user'));
