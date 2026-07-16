@@ -130,6 +130,24 @@
   .lobby-status { font-size: 13px; color: rgba(255,255,255,0.6); margin-top: 6px; }
   .lobby-err { font-size: 12px; color: #ff6b6b; min-height: 1px; text-align:center; }
   #lobbyHome, #lobbyWait { display:flex; flex-direction:column; align-items:center; gap:8px; width:100%; }
+  /* Auth + leaderboard */
+  .auth-area { width:100%; display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .gbtn {
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    width:100%; padding:11px 16px; font-size:15px; font-weight:600;
+    background:#fff; color:#000; border:none; border-radius:12px; cursor:pointer;
+  }
+  .gbtn:active { transform:scale(.98); }
+  .signed { font-size:13px; color:rgba(255,255,255,0.75); text-align:center; }
+  .link-btn { background:none; border:none; color:rgba(255,255,255,0.5); font-size:12px; cursor:pointer; text-decoration:underline; padding:2px; }
+  .lb-list { width:100%; display:flex; flex-direction:column; gap:6px; min-height:60px; max-height:56vh; overflow-y:auto; }
+  .lb-row { display:flex; align-items:center; gap:10px; background:rgba(255,255,255,0.06); border-radius:10px; padding:8px 10px; }
+  .lb-row.me { background:rgba(255,255,255,0.16); }
+  .lb-rank { width:22px; font-weight:700; color:rgba(255,255,255,0.6); text-align:center; flex:none; }
+  .lb-av { width:28px; height:28px; border-radius:50%; object-fit:cover; background:#333; flex:none; }
+  .lb-name { flex:1; font-size:14px; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .lb-val { font-weight:700; color:#fff; font-size:15px; flex:none; }
+  .lb-empty { color:rgba(255,255,255,0.5); font-size:13px; text-align:center; padding:16px; }
   #soundBtn {
     position: absolute; top: 14px; right: 14px; z-index: 5;
     padding: 8px 14px; font-size: 13px; font-weight: 600;
@@ -199,8 +217,22 @@
     <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
     <button id="leaveBtn" class="ghost hidden">🚪 გასვლა</button>
     <button id="onlineBtn" class="ghost">🌐 მეგობართან ონლაინ (beta)</button>
+    <button id="lbBtn" class="ghost">🏆 გლობალური რეიტინგები</button>
     <button id="profileBtn" class="ghost">👤 პროფილი & რეკორდები</button>
     <p id="recLine" class="rec"></p>
+  </div>
+
+  <!-- გლობალური ლიდერბორდი -->
+  <div id="leaderboard" class="panel hidden">
+    <div class="panel-card">
+      <button id="lbClose" class="x">✕</button>
+      <h2 class="panel-title">🏆 გლობალური რეიტინგები</h2>
+      <div class="seg-row">
+        <button class="seg lb-tab on" data-lb="longestRally">🔥 გაცვლა</button>
+        <button class="seg lb-tab" data-lb="wins">🏆 მოგებები</button>
+      </div>
+      <div id="lbList" class="lb-list"></div>
+    </div>
   </div>
 
   <!-- ონლაინ ლობი -->
@@ -237,7 +269,8 @@
       </div>
       <input id="nameInput" maxlength="20" placeholder="შენი სახელი">
       <div id="statsBox" class="stats"></div>
-      <p class="hint">🔒 პროფილი ლოკალურად ინახება. Google-ით შესვლა და გლობალური რეიტინგები მალე დაემატება.</p>
+      <div id="authArea" class="auth-area"></div>
+      <p class="hint">☁️ Google-ით შესვლისას პროფილი და რეკორდები ღრუბელში ინახება — ხელმისაწვდომია ნებისმიერ მოწყობილობაზე.</p>
     </div>
   </div>
 </div>
@@ -723,6 +756,7 @@ function recordResult(youWon) {
     else { s.losses = (s.losses || 0) + 1; s.streak = 0; }
   }
   saveStats(s);
+  if (window.FB && window.FB.user) pushCloud(); // ღრუბელში სინქრონი (თუ შესულია)
 }
 
 const profileEl = document.getElementById('profile');
@@ -770,6 +804,87 @@ avatarFile.addEventListener('change', e => {
   };
   reader.readAsDataURL(f);
 });
+
+// ---- Firebase glue (window.FB მოდულიდან) ----
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function safeUrl(u) { u = String(u || ''); return (/^https?:\/\//.test(u) || /^data:image\//.test(u)) ? u : ''; }
+const authArea = document.getElementById('authArea');
+function fbUser() { return window.FB && window.FB.user; }
+function updateAuthUI() {
+  const u = fbUser();
+  authArea.innerHTML = '';
+  if (u) {
+    const d = document.createElement('div'); d.className = 'signed';
+    d.innerHTML = `☁️ შესული ხარ: <b>${esc(u.name || 'Player')}</b>`;
+    const out = document.createElement('button'); out.className = 'link-btn'; out.textContent = 'გამოსვლა';
+    out.onclick = () => window.FB && window.FB.signOut();
+    authArea.append(d, out);
+    if (u.photo && !getProfile().avatar) avatarImg.src = u.photo;
+  } else {
+    const b = document.createElement('button'); b.className = 'gbtn'; b.textContent = '🔑 Google-ით შესვლა';
+    b.onclick = () => { if (window.FB) window.FB.signIn(); else alert('Firebase ჯერ იტვირთება, სცადე წამში'); };
+    authArea.append(b);
+  }
+}
+function mergeStats(a, b) {
+  a = a || {}; b = b || {};
+  return {
+    games: Math.max(a.games||0, b.games||0), wins: Math.max(a.wins||0, b.wins||0),
+    losses: Math.max(a.losses||0, b.losses||0), longestRally: Math.max(a.longestRally||0, b.longestRally||0),
+    bestStreak: Math.max(a.bestStreak||0, b.bestStreak||0), streak: a.streak||0,
+  };
+}
+async function pushCloud() {
+  if (!fbUser()) return;
+  const p = getProfile(), s = getStats();
+  try {
+    await window.FB.saveProfile({
+      uid: fbUser().uid, name: (p.name || fbUser().name || 'Player'), photo: (p.avatar || fbUser().photo || ''),
+      games: s.games||0, wins: s.wins||0, losses: s.losses||0, longestRally: s.longestRally||0, bestStreak: s.bestStreak||0, ts: Date.now(),
+    });
+  } catch (e) {}
+}
+async function syncCloud() {
+  if (!fbUser()) return;
+  let cloud = null; try { cloud = await window.FB.loadProfile(); } catch (e) {}
+  saveStats(mergeStats(getStats(), cloud));
+  const p = getProfile();
+  if (!p.name) p.name = fbUser().name || '';
+  if (!p.avatar && fbUser().photo) p.avatar = fbUser().photo;
+  saveProfile(p);
+  await pushCloud();
+  renderProfile(); updateRecLine();
+}
+window.addEventListener('fb-user', () => { updateAuthUI(); if (fbUser()) syncCloud(); });
+updateAuthUI();
+
+// ---- გლობალური ლიდერბორდი ----
+const lbPanel = document.getElementById('leaderboard');
+const lbListEl = document.getElementById('lbList');
+let lbField = 'longestRally';
+document.getElementById('lbBtn').addEventListener('click', () => { lbPanel.classList.remove('hidden'); loadLeaderboard(); });
+document.getElementById('lbClose').addEventListener('click', () => lbPanel.classList.add('hidden'));
+lbPanel.querySelectorAll('.lb-tab').forEach(t => t.addEventListener('click', () => {
+  lbField = t.dataset.lb;
+  lbPanel.querySelectorAll('.lb-tab').forEach(x => x.classList.toggle('on', x === t));
+  loadLeaderboard();
+}));
+async function loadLeaderboard() {
+  lbListEl.innerHTML = '<div class="lb-empty">იტვირთება…</div>';
+  if (!window.FB) { lbListEl.innerHTML = '<div class="lb-empty">რეიტინგი ჯერ არ ჩაიტვირთა — სცადე წამში ხელახლა</div>'; return; }
+  let rows = [];
+  try { rows = await window.FB.top(lbField, 20); }
+  catch (e) { lbListEl.innerHTML = '<div class="lb-empty">ვერ ჩაიტვირთა (შეამოწმე rules)</div>'; return; }
+  if (!rows.length) { lbListEl.innerHTML = '<div class="lb-empty">ჯერ ცარიელია — ითამაშე და გახდი პირველი! 🏓</div>'; return; }
+  const me = fbUser();
+  lbListEl.innerHTML = rows.map((r, i) => {
+    const mine = me && r.uid === me.uid ? ' me' : '';
+    const av = safeUrl(r.photo);
+    return `<div class="lb-row${mine}"><div class="lb-rank">${i+1}</div>` +
+      (av ? `<img class="lb-av" src="${av}" alt="">` : '<div class="lb-av"></div>') +
+      `<div class="lb-name">${esc(r.name || 'Player')}</div><div class="lb-val">${r[lbField] || 0}</div></div>`;
+  }).join('');
+}
 
 // ---- შედეგის გაზიარება ----
 shareBtn.addEventListener('click', async () => {
@@ -1348,6 +1463,46 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   });
 }
+</script>
+
+<!-- Firebase: Google შესვლა + ღრუბლოვანი პროფილი + ლიდერბორდები -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, collection, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDhSleq4Qgw3acBkvyzv2zjHWM35DwthC4",
+  authDomain: "tenisi-a37c5.firebaseapp.com",
+  projectId: "tenisi-a37c5",
+  storageBucket: "tenisi-a37c5.firebasestorage.app",
+  messagingSenderId: "856818394281",
+  appId: "1:856818394281:web:828c1a0583d99fc3e675b8"
+};
+
+try {
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const provider = new GoogleAuthProvider();
+
+  window.FB = {
+    user: null,
+    async signIn() {
+      try { await signInWithPopup(auth, provider); }
+      catch (e) { try { await signInWithRedirect(auth, provider); } catch (_) {} }
+    },
+    signOut() { try { signOut(auth); } catch (e) {} },
+    async saveProfile(data) { if (!auth.currentUser) return; await setDoc(doc(db, 'users', auth.currentUser.uid), data, { merge: true }); },
+    async loadProfile() { if (!auth.currentUser) return null; const s = await getDoc(doc(db, 'users', auth.currentUser.uid)); return s.exists() ? s.data() : null; },
+    async top(field, n) { const snap = await getDocs(query(collection(db, 'users'), orderBy(field, 'desc'), limit(n || 20))); return snap.docs.map(d => d.data()); },
+  };
+  getRedirectResult(auth).catch(() => {});
+  onAuthStateChanged(auth, u => {
+    window.FB.user = u ? { uid: u.uid, name: u.displayName, photo: u.photoURL, email: u.email } : null;
+    window.dispatchEvent(new CustomEvent('fb-user'));
+  });
+} catch (e) { console.warn('Firebase init failed', e); }
 </script>
 </body>
 </html>
