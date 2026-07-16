@@ -1340,13 +1340,21 @@ const roomCodeEl = document.getElementById('roomCode');
 const lobbyStatus = document.getElementById('lobbyStatus');
 
 // STUN + უფასო public TURN (Open Relay) — მკაცრ ქსელებზეც დამყარდეს კავშირი
-const ICE = { iceServers: [
+// ICE: Google STUN + Metered TURN (relay, VPN/სხვა-ქსელისთვის). credentials დინამიურად ვიღებთ.
+const STUN = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-] };
+];
+const METERED_URL = 'https://tetrisi.metered.live/api/v1/turn/credentials?apiKey=8fcaf6793f793b11ba7444e81675ec2bfbf5';
+let cachedIce = null;
+async function getIceServers() {
+  if (cachedIce) return cachedIce;
+  try {
+    const r = await fetch(METERED_URL);
+    if (r.ok) { const list = await r.json(); if (Array.isArray(list) && list.length) { cachedIce = STUN.concat(list); return cachedIce; } }
+  } catch (e) {}
+  return STUN; // fallback — მხოლოდ STUN (იგივე Wi-Fi მაინც იმუშავებს)
+}
 function inviteLink(code) { return location.origin + location.pathname + '?room=' + code; }
 
 function genCode() {
@@ -1396,8 +1404,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && online) acquireWake();
 });
 
-// WebRTC კონფიგი (STUN + TURN — იგივე ICE)
-const rtcConfig = { iceServers: ICE.iceServers };
 function fbReady() { return !!(window.FB && window.FB.room); }
 
 // RTCDataChannel-ს PeerJS-ის მსგავს ინტერფეისში ვახვევთ (netcode უცვლელი რჩება)
@@ -1416,7 +1422,7 @@ async function startHost() {
   if (!fbReady()) return lobbyError('ონლაინი ჯერ არ ჩაიტვირთა — სცადე წამში');
   acquireWake();
   const code = genCode();
-  const pc = new RTCPeerConnection(rtcConfig);
+  const pc = new RTCPeerConnection({ iceServers: await getIceServers() });
   online = { role: 'host', pc, code, connected: false, oppTarget: W/2 - PADDLE_W/2, unsubs: [] };
   const ch = pc.createDataChannel('game'); // reliable ordered — კონტროლ-შეტყობინებები არ დაიკარგოს
   ch.onopen = () => beginOnlineGame();
@@ -1444,7 +1450,7 @@ async function startJoin(code) {
   roomCodeEl.textContent = code; lobbyStatus.textContent = '⏳ ვუკავშირდები…';
   let room; try { room = await window.FB.room.get(code); } catch (e) { return lobbyError('შეცდომა — შეამოწმე Firestore rules'); }
   if (!room || !room.offer) return lobbyError('ოთახი ვერ მოიძებნა — შეამოწმე კოდი');
-  const pc = new RTCPeerConnection(rtcConfig);
+  const pc = new RTCPeerConnection({ iceServers: await getIceServers() });
   online = { role: 'guest', pc, code, connected: false, snap: null, unsubs: [] };
   pc.ondatachannel = e => { const ch = e.channel; ch.onopen = () => beginOnlineGuest(); wireChannel(ch); };
   pc.onicecandidate = e => { if (e.candidate) window.FB.room.cand(code, 'callee', e.candidate.toJSON()); };
