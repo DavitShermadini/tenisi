@@ -197,6 +197,7 @@
     <div id="grid"></div>
     <button id="startBtn">დაწყება</button>
     <button id="shareBtn" class="ghost hidden">📤 შედეგის გაზიარება</button>
+    <button id="leaveBtn" class="ghost hidden">🚪 გასვლა</button>
     <button id="onlineBtn" class="ghost">🌐 მეგობართან ონლაინ (beta)</button>
     <button id="profileBtn" class="ghost">👤 პროფილი & რეკორდები</button>
     <p id="recLine" class="rec"></p>
@@ -218,7 +219,7 @@
       <div id="lobbyWait" class="hidden">
         <p class="lobby-msg">გაუზიარე მეგობარს კოდი:</p>
         <div id="roomCode" class="room-code"></div>
-        <button id="copyCodeBtn" class="ghost">📋 კოდის კოპირება</button>
+        <button id="copyCodeBtn" class="ghost">🔗 მოსაწვევის გაზიარება</button>
         <p class="lobby-status" id="lobbyStatus">⏳ ველოდები მეგობარს…</p>
       </div>
       <p id="lobbyErr" class="lobby-err"></p>
@@ -571,6 +572,7 @@ function startGame() {
   running = true;
   stopMusic(); // თამაშის დროს ფონი ჩუმდება — მხოლოდ sfx რჩება
   shareBtn.classList.add('hidden');
+  leaveBtn.classList.add('hidden');
   gridEl.textContent = '';
   overlay.classList.add('hidden');
 }
@@ -615,9 +617,35 @@ function endGame(msg) {
 
   overlay.classList.remove('hidden');
   startMusic(); // მენიუ დაბრუნდა — ფონური მუსიკა განახლდება
+  if (online) { startBtn.textContent = '↻ რევანში'; leaveBtn.classList.remove('hidden'); } // online host
 }
 
-startBtn.addEventListener('click', startGame);
+const leaveBtn = document.getElementById('leaveBtn');
+startBtn.addEventListener('click', () => {
+  if (online && online.role === 'host') { // host — რევანში იმავე მეგობართან
+    online.overShown = false;
+    try { online.conn && online.conn.send({ t: 'rematch' }); } catch (e) {}
+    startGame();
+    return;
+  }
+  startGame();
+});
+leaveBtn.addEventListener('click', () => {
+  try { online && online.conn && online.conn.send({ t: 'bye' }); } catch (e) {}
+  endOnline();
+  showMenu();
+});
+// მენიუს საწყისი მდგომარეობა
+function showMenu() {
+  running = false;
+  overlay.querySelector('h1').textContent = 'ტ ე ნ ი ს ი';
+  startBtn.textContent = 'დაწყება'; startBtn.classList.remove('hidden');
+  leaveBtn.classList.add('hidden'); shareBtn.classList.add('hidden');
+  gridEl.textContent = '';
+  updateMenuUI(true); updateRecLine();
+  overlay.classList.remove('hidden');
+  startMusic();
+}
 
 // ---- მენიუ: რეჟიმი / მხარე / რეკორდი ----
 const modeRow = document.getElementById('modeRow');
@@ -991,6 +1019,9 @@ function drawCenterNumber(text, fontPx, fill) {
 }
 
 function draw() {
+  // guest ხედავს ველს ვერტიკალურად შებრუნებულს — თავისი რაკეტი ქვემოთ ჰქონდეს
+  const guestView = !!(online && online.role === 'guest');
+  const FY = y => guestView ? H - y : y;
   ctx.save();
   if (shake > 0.3) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
 
@@ -1042,28 +1073,29 @@ function draw() {
       ctx.save(); ctx.translate(x, y); ctx.rotate(corr);
       ctx.textAlign = 'left'; ctx.fillText(text, 0, 0); ctx.restore();
     };
-    drawScore(scoreA, 18, H/2 - 24);
-    drawScore(scoreP, 18, H/2 + 56);
+    // guest-ისთვის „შენი" ქულა (scoreA) ქვემოთ, მოწინააღმდეგისა ზემოთ
+    drawScore(guestView ? scoreP : scoreA, 18, H/2 - 24);
+    drawScore(guestView ? scoreA : scoreP, 18, H/2 + 56);
   }
 
-  // ბურთის კვალი
+  // ბურთის კვალი (guest-ისთვის Y შებრუნებული)
   for (let i = 0; i < trail.length; i++) {
     const a = (i / trail.length) * 0.5;
     const s = BALL * (0.4 + 0.6 * i / trail.length);
     ctx.fillStyle = accent(a);
-    ctx.fillRect(trail[i].x - s/2, trail[i].y - s/2, s, s);
+    ctx.fillRect(trail[i].x - s/2, FY(trail[i].y) - s/2, s, s);
   }
 
   // რაკეტები (skin-ის ფერი)
   ctx.fillStyle = paddleCol();
-  roundRect(pTop.x, pTop.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
-  roundRect(pBottom.x, pBottom.y - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+  roundRect(pTop.x, FY(pTop.y) - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
+  roundRect(pBottom.x, FY(pBottom.y) - PADDLE_H/2, PADDLE_W, PADDLE_H, 7);
 
   // ბურთი — rally-სთან ერთად ანთდება
   ctx.shadowColor = accent(0.9);
   ctx.shadowBlur = 8 + glow * 22;
   ctx.fillStyle = accent(1);
-  ctx.fillRect(ball.x - BALL/2, ball.y - BALL/2, BALL, BALL);
+  ctx.fillRect(ball.x - BALL/2, FY(ball.y) - BALL/2, BALL, BALL);
   ctx.shadowBlur = 0;
 
   ctx.restore();
@@ -1087,6 +1119,17 @@ const lobbyWait = document.getElementById('lobbyWait');
 const lobbyErrEl = document.getElementById('lobbyErr');
 const roomCodeEl = document.getElementById('roomCode');
 const lobbyStatus = document.getElementById('lobbyStatus');
+
+// STUN + უფასო public TURN (Open Relay) — მკაცრ ქსელებზეც დამყარდეს კავშირი
+const ICE = { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+] };
+function newPeer(id) { return new Peer(id, { debug: 0, config: ICE }); }
+function inviteLink(code) { return location.origin + location.pathname + '?room=' + code; }
 
 function genCode() {
   const s = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -1117,13 +1160,20 @@ document.getElementById('joinRoomBtn').addEventListener('click', () => {
   if (code.length >= 3) startJoin(code);
 });
 document.getElementById('copyCodeBtn').addEventListener('click', async () => {
-  try { await navigator.clipboard.writeText(roomCodeEl.textContent); } catch (e) {}
+  const code = roomCodeEl.textContent;
+  const link = inviteLink(code);
+  const text = `შემომიერთდი ტენისში! 🏓\nოთახი: ${code}\n${link}`;
+  const btn = document.getElementById('copyCodeBtn');
+  try {
+    if (navigator.share) { await navigator.share({ text }); }
+    else { await navigator.clipboard.writeText(link); btn.textContent = '✅ დაკოპირდა!'; setTimeout(() => btn.textContent = '🔗 მოსაწვევის გაზიარება', 1600); }
+  } catch (e) {}
 });
 
 function startHost() {
   if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
   const code = genCode();
-  const peer = new Peer('tenisi-' + code, { debug: 0 });
+  const peer = newPeer('tenisi-' + code);
   online = { role: 'host', peer, conn: null, connected: false, oppTarget: W/2 - PADDLE_W/2, code };
   peer.on('open', () => {
     roomCodeEl.textContent = code;
@@ -1139,8 +1189,8 @@ function startHost() {
 }
 function startJoin(code) {
   if (typeof Peer === 'undefined') return lobbyError('ონლაინ მოდული მიუწვდომელია');
-  const peer = new Peer(undefined, { debug: 0 });
-  online = { role: 'guest', peer, conn: null, connected: false, lastState: null };
+  const peer = newPeer(undefined);
+  online = { role: 'guest', peer, conn: null, connected: false, snap: null };
   lobbyStatus.textContent = '⏳ ვუკავშირდები…';
   lobbyHome.classList.add('hidden'); lobbyWait.classList.remove('hidden');
   roomCodeEl.textContent = code;
@@ -1158,51 +1208,66 @@ function setupConn(c) {
   c.on('error', () => {});
 }
 function beginOnlineGame() { // host
-  online.connected = true; closeLobby();
+  online.connected = true; online.overShown = false; closeLobby();
   mode = 'cpu'; // ლეიაუტისთვის (AI გამორთულია online-ის გამო)
   startGame();
 }
 function beginOnlineGuest() {
-  online.connected = true; closeLobby();
+  online.connected = true; online.overShown = false; online.snap = null; closeLobby();
   mode = 'cpu';
   overlay.classList.add('hidden');
   running = false; // პირველ state-მდე
 }
 function onNetData(d) {
-  if (!online) return;
+  if (!online || !d) return;
   if (online.role === 'host') {
-    if (d && d.t === 'i') online.oppTarget = d.x;
+    if (d.t === 'i') online.oppTarget = d.x;
+    else if (d.t === 'bye') opponentLeft();
   } else {
-    if (d && d.t === 's') { online.lastState = d; applyState(d); }
+    if (d.t === 's') applyState(d);
+    else if (d.t === 'rematch') guestRematch();
+    else if (d.t === 'bye') opponentLeft();
   }
 }
 function applyState(st) { // guest — host-ის ავტორიტეტული მდგომარეობა (pTop ლოკალურია)
-  ball.x = st.b[0]; ball.y = st.b[1];
+  if (!online.snap) { ball.x = st.b[0]; ball.y = st.b[1]; } // პირველი snapshot
+  online.snap = { x: st.b[0], y: st.b[1] };
+  ball.vx = st.v ? st.v[0] / 10 : 0;
+  ball.vy = st.v ? st.v[1] / 10 : 0;
   pBottom.x = st.bot;
-  scoreP = st.sp; scoreA = st.sa;
-  rally = st.rl;
+  scoreP = st.sp; scoreA = st.sa; rally = st.rl;
   countdownUntil = st.cd > 0 ? performance.now() + st.cd : 0;
   const wasRunning = running;
   running = st.run;
+  if (st.run) online.overShown = false; // ახალი მატჩი/რევანში დაიწყო
   if (!st.run && wasRunning && !online.overShown) { online.overShown = true; showOnlineOver(st.sp, st.sa); }
 }
-function showOnlineOver(sp, sa) { // guest = ზედა მხარე
+function showOnlineOver(sp, sa) { // guest = ზედა მხარე (scoreA)
   const won = sa > sp;
   overlay.querySelector('h1').textContent = won ? 'შენ მოიგე! 🏆' : 'წააგე';
-  subtitleEl.textContent = `ანგარიში ${sa} : ${sp}`;
-  startBtn.textContent = 'მენიუ';
+  subtitleEl.textContent = `ანგარიში ${sa} : ${sp}  •  ⏳ ველოდები რევანშს…`;
+  startBtn.classList.add('hidden');       // guest რევანშს ვერ იწყებს
+  leaveBtn.classList.remove('hidden');
   overlay.classList.remove('hidden');
-  setTimeout(endOnline, 400);
+  startMusic();
 }
-function onNetClose() {
-  if (!online) return;
-  if (!online.overShown && running) {
-    overlay.querySelector('h1').textContent = 'კავშირი გაწყდა';
-    subtitleEl.textContent = 'მეგობარი გავიდა';
-    overlay.classList.remove('hidden');
-  }
+function guestRematch() { // host-მა რევანში დაიწყო
+  online.overShown = false;
+  startBtn.classList.remove('hidden');
+  leaveBtn.classList.add('hidden');
+  overlay.classList.add('hidden');
+}
+function opponentLeft() {
   endOnline();
+  overlay.querySelector('h1').textContent = 'მეგობარი გავიდა 👋';
+  subtitleEl.textContent = 'ონლაინ სესია დასრულდა';
+  startBtn.textContent = 'დაწყება'; startBtn.classList.remove('hidden');
+  leaveBtn.classList.add('hidden'); shareBtn.classList.add('hidden');
+  updateMenuUI(false);
+  overlay.classList.remove('hidden');
+  startMusic();
 }
+function onNetClose() { if (online) opponentLeft(); }
 function endOnline() {
   if (!online) return;
   try { online.conn && online.conn.close(); } catch (e) {}
@@ -1213,24 +1278,49 @@ function endOnline() {
 function netSendState() {
   const c = online.conn; if (!c || !c.open) return;
   const cd = Math.max(0, countdownUntil - performance.now());
-  try { c.send({ t: 's', b: [Math.round(ball.x), Math.round(ball.y)], bot: Math.round(pBottom.x), sp: scoreP, sa: scoreA, cd: Math.round(cd), rl: rally, run: running }); } catch (e) {}
+  try {
+    c.send({
+      t: 's',
+      b: [Math.round(ball.x), Math.round(ball.y)],
+      v: [Math.round(ball.vx * 10), Math.round(ball.vy * 10)], // სიჩქარე ინტერპოლაციისთვის
+      bot: Math.round(pBottom.x), sp: scoreP, sa: scoreA,
+      cd: Math.round(cd), rl: rally, run: running
+    });
+  } catch (e) {}
 }
 function netSendInput() {
   const c = online.conn; if (!c || !c.open) return;
   try { c.send({ t: 'i', x: Math.round(pTop.target) }); } catch (e) {}
 }
 
+// მოსაწვევი ბმულით ავტო-შეერთება (?room=CODE)
+(function autoJoin() {
+  const rp = (new URLSearchParams(location.search).get('room') || '').trim().toUpperCase();
+  if (rp && typeof Peer !== 'undefined') {
+    openLobby();
+    document.getElementById('joinCode').value = rp;
+    startJoin(rp);
+    history.replaceState(null, '', location.pathname); // URL გავასუფთაოთ
+  }
+})();
+
 // ---- ციკლი ----
 function loop() {
   if (online && online.connected) {
     if (online.role === 'host') {
       if (running) { if (online.oppTarget != null) pTop.target = online.oppTarget; update(); }
-      netSendState();
-      if (!running && online.overShown !== 'done' && online.endAt && performance.now() > online.endAt) { online.overShown = 'done'; endOnline(); }
-      if (!running && !online.endAt) online.endAt = performance.now() + 1200; // over-ის შემდეგ ცოტა ხანში teardown
-    } else { // guest
+      netSendState(); // over-ის შემდეგაც აგრძელებს (რევანშისთვის კავშირი ღიაა)
+    } else { // guest — თავისი რაკეტი ლოკალურად, ბურთი ინტერპოლაციით
       pTop.target = Math.max(0, Math.min(W - PADDLE_W, pTop.target));
       pTop.x += (pTop.target - pTop.x) * 0.35;
+      const now = performance.now();
+      if (online.snap) {
+        if (running && now >= countdownUntil) { // dead-reckoning + კორექცია
+          ball.x += ball.vx; ball.y += ball.vy;
+          ball.x += (online.snap.x - ball.x) * 0.2;
+          ball.y += (online.snap.y - ball.y) * 0.2;
+        } else { ball.x = online.snap.x; ball.y = online.snap.y; } // ათვლა/პაუზა — ზუსტად snapshot-ზე
+      }
       netSendInput();
     }
     draw();
